@@ -1,1 +1,11 @@
-pre-commit
+# Development / CI tooling. Not installed on deploy hosts.
+#
+# Phase 2 extends this file with ruff + pytest-cov for the new CI gate.
+# Phase 5/6 may migrate other dev-only tooling (pytest, black, isort, etc.)
+# from requirements.txt into here.
+#
+# Pins are exact (==) for CI reproducibility.
+
+pre-commit==3.7.1
+ruff==0.15.12
+pytest-cov==7.1.0
