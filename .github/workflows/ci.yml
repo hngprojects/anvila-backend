@@ -1,9 +1,5 @@
 name: CI
 
-# Phase 2 CI gate for anvila-backend.
-# Co-exists with .github/workflows/vulnerability_scanner.yml (separate triggers, separate jobs).
-# This workflow gates PRs into dev/staging/main and re-validates post-merge head of dev.
-
 on:
   pull_request:
     branches: [dev, staging, main]
@@ -31,14 +27,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
+          cache-dependency-path: requirements.txt
 
-      - name: Install dev dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+      - name: Install ruff
+        run: pip install ruff==0.15.12
 
       - name: Ruff check
         run: ruff check .
@@ -46,8 +38,6 @@ jobs:
   test:
     name: test
     runs-on: ubuntu-latest
-    # First CI baseline. Dep install + (no-op-for-now) migrations + full pytest can be slow on a
-    # cold runner. Tighten after we have actual run-time data.
     timeout-minutes: 25
 
     services:
@@ -67,9 +57,6 @@ jobs:
           --health-start-period=10s
 
     env:
-      # Database connection. DB_URL is canonical — alembic/env.py:23 and tests/conftest.py:45 both
-      # read it via python-decouple. DB_HOST/PORT/USER/PASSWORD/NAME/TYPE are also decouple-required
-      # at Settings import time (api/utils/settings.py).
       DB_TYPE: postgresql
       DB_NAME: ci
       DB_USER: ci
@@ -79,38 +66,30 @@ jobs:
       DB_URL: postgresql://ci:ci@localhost:5432/ci
       MYSQL_DRIVER: ""
 
-      # JWT / auth (CI-only dummy values).
       SECRET_KEY: ci-only-not-a-real-secret-do-not-reuse
       ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: 30
       JWT_REFRESH_EXPIRY: 7
 
-      # Mail (decouple-required at Settings import time; dummy values).
-      MAIL_USERNAME: ci-noreply@example.invalid
+      MAIL_USERNAME: ci-noreply@example.com
       MAIL_PASSWORD: ci-mail-not-a-real-password
-      MAIL_FROM: ci-noreply@example.invalid
+      MAIL_FROM: ci-noreply@example.com
       MAIL_PORT: 587
       MAIL_SERVER: smtp.example.invalid
 
-      # Payments / SMS — example.invalid is RFC-2606 guaranteed-unreachable.
       FLUTTERWAVE_SECRET: ci-flw-not-real
       TWILIO_ACCOUNT_SID: ci-twilio-sid-not-real
       TWILIO_AUTH_TOKEN: ci-twilio-token-not-real
       TWILIO_PHONE_NUMBER: "+10000000000"
 
-      # App metadata.
       APP_NAME: anvila-backend-ci
       TELEX_WEBHOOK_URL: https://example.invalid/telex
 
-      # OAuth / frontend (read in modules outside Settings).
       GOOGLE_CLIENT_ID: ci-google-client-not-real
       GOOGLE_CLIENT_SECRET: ci-google-secret-not-real
       FRONTEND_URL: http://localhost:3000
 
-      # Test-mode flags.
-      # google_login.py:145 checks `config("TESTING") != "TEST"` — TESTING must be exactly "TEST".
       TESTING: "TEST"
-      # In-app test endpoints (/api/v1/hng-test, /api/v1/all/run-tests) are DoS/RCE risk. Keep false.
       ENABLE_INSECURE_TEST_ENDPOINTS: "false"
 
     steps:
@@ -122,23 +101,17 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install -r requirements-dev.txt
+          pip install pytest-cov==7.1.0
 
       - name: Run migrations
-        # alembic/versions/ is empty as of Phase 2; this is a no-op until migrations land.
-        # Kept in CI so the moment migrations are committed they are validated.
         run: alembic upgrade head
 
       - name: Run tests
-        # Tests bootstrap schemas via Base.metadata.create_all (tests/database.py, per-test fixtures),
-        # not via alembic. They will work even with no migrations committed.
         run: |
           PYTHONPATH=. pytest -v --cov=api

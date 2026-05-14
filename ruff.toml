@@ -1,24 +1,3 @@
-# anvila-backend — initial conservative ruff config.
-#
-# Phase 2 introduces ruff as a CI gate. Selection is intentionally narrow so the
-# very first PR cutting CI does not turn into a whole-codebase lint-cleanup.
-#
-# What this catches today (high-signal "your code can't run" rules):
-#   E9    — pycodestyle: runtime/syntax errors (IndentationError, etc.)
-#   F821  — pyflakes: undefined name (NameError at runtime)
-#   F823  — pyflakes: local var referenced before assignment
-#
-# What is DEFERRED to a dedicated lint-hardening PR:
-#   F811 (redefined-while-unused) — fires extensively on this codebase due to
-#         duplicate imports (carried forward from the boilerplate). The hardening
-#         PR will fix the duplicates and re-enable F811.
-#   Style rules (E2xx, E5xx, W, UP, B, etc.) — broadening these will produce
-#         churn; do it in its own reviewable change with format-on-save settings
-#         agreed first.
-#
-# Phase 5/6 may also tighten target-version once we know what the actual deploy
-# host runs.
-
 target-version = "py312"
 line-length = 100
 
