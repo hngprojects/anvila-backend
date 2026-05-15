@@ -24,7 +24,7 @@ class PersonaSkill(BaseModel):
     )
     skill_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("skills.id"),
+        ForeignKey("skills.id", ondelete="CASCADE"),
         nullable=False,
     )
 
