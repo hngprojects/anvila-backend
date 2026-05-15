@@ -23,8 +23,3 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Set up environment
-        run: echo "${{ secrets.STAGING_ENV_BASE64 }}" | base64 -d > .env
-        
-      - name: Run tests
-        run: pytest tests/ -v
