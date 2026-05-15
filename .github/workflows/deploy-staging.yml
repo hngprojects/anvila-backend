@@ -1,0 +1,88 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: "staging"
+      url: "https://api.staging.anvila.hng14.com"
+
+    steps:
+      - name: Deploy to staging server
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            set -e
+
+            echo "=== Deploying Backend Staging ==="
+
+            # Navigate to staging directory
+            cd ~/anvila/backend/staging
+
+            # Snapshot current PM2 state for rollback
+            echo "=== Snapshotting PM2 state ==="
+            pm2 save || true
+            PM2_SNAPSHOT=$(pm2 describe backend-staging 2>/dev/null | grep "restarts" || echo "no-prior-process")
+
+            # Pull latest code (safe sync)
+            echo "=== Syncing code ==="
+            git fetch origin staging
+            git reset --hard origin/staging
+
+            # Write .env file
+            echo "${{ secrets.STAGING_ENV_BASE64 }}" | base64 -d > .env
+
+            # Install all dependency groups (parity with CI)
+            echo "=== Installing dependencies ==="
+            pip install -r requirements.txt
+
+            # Run database migrations (MUST succeed before proceeding)
+            echo "=== Running Alembic Migrations ==="
+            alembic upgrade head
+
+            # Start or restart the application
+            echo "=== Starting PM2 Process ==="
+            if pm2 describe backend-staging > /dev/null 2>&1; then
+              pm2 restart backend-staging --update-env
+            else
+              pm2 start "uvicorn app.main:app --host 0.0.0.0 --port 8000" --name backend-staging
+            fi
+
+            # Health check with retry
+            echo "=== Running Health Check ==="
+            MAX_RETRIES=15
+            RETRY_COUNT=0
+            HEALTH_PORT=8000
+
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if curl -sf "http://localhost:${HEALTH_PORT}/" > /dev/null 2>&1; then
+                echo "✅ Health check passed after $((RETRY_COUNT + 1)) attempt(s)"
+                break
+              fi
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "⏳ Health check attempt ${RETRY_COUNT}/${MAX_RETRIES} failed, retrying in 2s..."
+              sleep 2
+            done
+
+            if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+              echo "❌ Health check failed after ${MAX_RETRIES} attempts. Rolling back..."
+              pm2 resurrect || pm2 start "uvicorn app.main:app --host 0.0.0.0 --port 8000" --name backend-staging
+              echo "❌ Deployment FAILED - health check did not pass. Rolled back to previous state."
+              exit 1
+            fi
+
+            echo "=== Staging Deployment Complete ==="
