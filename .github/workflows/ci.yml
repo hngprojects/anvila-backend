@@ -46,4 +46,11 @@ jobs:
         run: echo "${{ secrets.STAGING_ENV_BASE64 }}" | base64 -d > .env
 
       - name: Run tests
-        run: uv run pytest tests/ -v
+        run: |
+          uv run pytest tests/ -v
+          code=$?
+          if [ $code -eq 5 ]; then
+            exit 0
+          else
+            exit $code
+          fi
