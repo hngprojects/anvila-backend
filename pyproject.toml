@@ -16,6 +16,7 @@ dependencies = [
     "pwdlib[argon2]>=0.3.0",
     "sib-api-v3-sdk>=7.6.0",
     "python-decouple>=3.8",
+    "python-jose[cryptography]>=3.5.0",
 ]
 
 [dependency-groups]
@@ -29,4 +30,6 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
