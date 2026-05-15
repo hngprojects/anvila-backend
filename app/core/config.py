@@ -14,6 +14,8 @@ class Settings(BaseSettings):
 
     PROJECT_NAME: str = "anvila-backend"
     API_V1_PREFIX: str = "/api/v1"
+    ADMIN_EMAIL: str | None = None
+    ADMIN_PASSWORD: str | None = None
 
     DATABASE_URL: PostgresDsn
     LOG_LEVEL: str = "INFO"
