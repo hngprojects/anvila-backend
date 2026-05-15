@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     DATABASE_URL: PostgresDsn
     LOG_LEVEL: str = "INFO"
 
+    # Email delivery
+    BREVO_API_KEY: str = ""
+    MAIL_FROM: str = "noreply@anvila.app"
+    MAIL_FROM_NAME: str = "Anvila"
+    FRONTEND_URL: str = "http://localhost:3000"
+
 
 @lru_cache
 def get_settings() -> Settings:
