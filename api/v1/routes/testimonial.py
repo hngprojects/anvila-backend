@@ -100,7 +100,7 @@ def create_testimonial(
 def get_user_testimonials(
     user_id: str,
     page_size: Annotated[int, Query(ge=1, description="Number of testimonials per page")] = 10,
-    page: Annotated[int, Query(ge=1, description="Page number (starts from 1)")] = 0,
+    page: Annotated[int, Query(ge=0, description="Page number (starts from 0)")] = 0,
     db: Session = Depends(get_db),
     current_user: User = Depends(user_service.get_current_user),
 ):

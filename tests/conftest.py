@@ -8,6 +8,15 @@ from sqlalchemy.orm import sessionmaker
 from decouple import config as decouple_config
 from datetime import datetime, timezone
 
+# passlib 1.7.4 is incompatible with bcrypt >= 4.0: detect_wrap_bug() passes a
+# 73-byte password which bcrypt 4.x now rejects with ValueError instead of
+# silently truncating. Patch it out before any test file is imported.
+try:
+    import passlib.handlers.bcrypt as _passlib_bcrypt
+    _passlib_bcrypt.detect_wrap_bug = lambda ident: False
+except Exception:
+    pass
+
 # Import all models so SQLAlchemy's metadata is fully populated before create_all()
 import api.v1.models  # noqa: F401
 from api.v1.models.permissions.permissions import Permission  # noqa: F401
