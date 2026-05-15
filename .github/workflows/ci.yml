@@ -34,6 +34,7 @@ jobs:
       DB_HOST: localhost
       DB_PORT: 5432
       DB_URL: postgresql://ci:ci@localhost:5432/ci
+      MYSQL_DRIVER: ""
 
       SECRET_KEY: ci-only-not-a-real-secret-do-not-reuse
       ALGORITHM: HS256
