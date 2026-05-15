@@ -9,7 +9,7 @@ bcrypt==3.2.2
 certifi==2026.4.22
 cffi==2.0.0
 cfgv==3.5.0
-click==8.1.7
+click==8.2.1
 distlib==0.4.0
 dnspython==2.8.0
 email-validator==2.3.0
