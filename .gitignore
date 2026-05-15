@@ -176,5 +176,7 @@ alembic/versions
 
 **/.DS_Store
 
+CLAUDE.md
+
 .vscode
 public/
