@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException
@@ -13,14 +13,16 @@ pwd_hash = PasswordHash.recommended()
 
 def create_access_token(payload: dict) -> str:
     data = payload.copy()
-    data["exp"] = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    data["exp"] = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    )
     data["purpose"] = "access"
     return jwt.encode(data, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
 def create_refresh_token(payload: dict) -> str:
     data = payload.copy()
-    data["exp"] = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    data["exp"] = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     data["purpose"] = "refresh"
     return jwt.encode(data, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 

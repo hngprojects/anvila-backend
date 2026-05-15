@@ -62,6 +62,8 @@ def test_decode_token_expired():
     with pytest.raises(HTTPException) as exc_info:
         sec.decode_token(token)
     assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Invalid or expired token"
+    assert exc_info.value.headers["WWW-Authenticate"] == "Bearer"
 
 
 def test_decode_token_invalid_signature():
@@ -69,6 +71,8 @@ def test_decode_token_invalid_signature():
     with pytest.raises(HTTPException) as exc_info:
         sec.decode_token(token)
     assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Invalid or expired token"
+    assert exc_info.value.headers["WWW-Authenticate"] == "Bearer"
 
 
 def test_decode_token_wrong_secret():
@@ -77,6 +81,8 @@ def test_decode_token_wrong_secret():
     with pytest.raises(HTTPException) as exc_info:
         sec.decode_token(tampered)
     assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "Invalid or expired token"
+    assert exc_info.value.headers["WWW-Authenticate"] == "Bearer"
 
 
 def test_access_token_expiry_is_24_hours():

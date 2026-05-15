@@ -1,6 +1,7 @@
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic import PostgresDsn
+from pydantic import Field, PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,10 +19,10 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str | None = None
 
     DATABASE_URL: PostgresDsn
-    JWT_SECRET: str
+    JWT_SECRET: Annotated[str, Field(min_length=32)]
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    ACCESS_TOKEN_EXPIRE_MINUTES: Annotated[int, Field(gt=0)] = 1440
+    REFRESH_TOKEN_EXPIRE_DAYS: Annotated[int, Field(gt=0)] = 7
     LOG_LEVEL: str = "INFO"
 
 
