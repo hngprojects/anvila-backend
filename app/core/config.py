@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     DATABASE_URL: PostgresDsn
     LOG_LEVEL: str = "INFO"
 
+    GOOGLE_CLIENT_ID: str
+    GOOGLE_CLIENT_SECRET: str
+    GOOGLE_REDIRECT_URI: str
+
+    GOOGLE_AUTH_URL: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    GOOGLE_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
+    GOOGLE_USERINFO_URL: str = "https://openidconnect.googleapis.com/v1/userinfo"
+    GOOGLE_SCOPES: str = "openid email profile"
+
 
 @lru_cache
 def get_settings() -> Settings:
