@@ -172,7 +172,7 @@ jeff.py
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-alembic/versions
+# alembic/versions
 
 **/.DS_Store
 
