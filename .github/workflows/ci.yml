@@ -10,6 +10,58 @@ jobs:
   lint-and-test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U ci -d ci"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+          --health-start-period=10s
+
+    env:
+      DB_TYPE: postgresql
+      DB_NAME: ci
+      DB_USER: ci
+      DB_PASSWORD: ci
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_URL: postgresql://ci:ci@localhost:5432/ci
+
+      SECRET_KEY: ci-only-not-a-real-secret-do-not-reuse
+      ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: 30
+      JWT_REFRESH_EXPIRY: 7
+
+      MAIL_USERNAME: ci-noreply@example.com
+      MAIL_PASSWORD: ci-mail-not-a-real-password
+      MAIL_FROM: ci-noreply@example.com
+      MAIL_PORT: 587
+      MAIL_SERVER: smtp.example.invalid
+
+      FLUTTERWAVE_SECRET: ci-flw-not-real
+      TWILIO_ACCOUNT_SID: ci-twilio-sid-not-real
+      TWILIO_AUTH_TOKEN: ci-twilio-token-not-real
+      TWILIO_PHONE_NUMBER: "+10000000000"
+
+      APP_NAME: anvila-backend-ci
+      TELEX_WEBHOOK_URL: https://example.invalid/telex
+      ANCHOR_PYTHON_BASE_URL: http://localhost:3000
+
+      GOOGLE_CLIENT_ID: ci-google-client-not-real
+      GOOGLE_CLIENT_SECRET: ci-google-secret-not-real
+      FRONTEND_URL: http://localhost:3000
+
+      TESTING: "TEST"
+      ENABLE_INSECURE_TEST_ENDPOINTS: "false"
+
     steps:
       - uses: actions/checkout@v4
 
@@ -23,3 +75,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Lint
+        run: ruff check .
+
+      - name: Create tables
+        run: |
+          python -c "
+          from api.v1.models import *
+          from api.v1.models.permissions.permissions import Permission
+          from api.v1.models.permissions.role import Role
+          from api.db.database import create_database
+          create_database()
+          print('All tables created')
+          "
+
+      - name: Run tests
+        run: |
+          PYTHONPATH=. pytest -v --cov=api

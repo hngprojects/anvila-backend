@@ -5,8 +5,6 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from alembic.command import upgrade
-from alembic.config import Config
 from decouple import config as decouple_config
 from datetime import datetime, timezone
 
@@ -50,15 +48,12 @@ def db_engine():
 
 @pytest.fixture(scope="session")
 def apply_migrations(db_engine):
-    """Apply all migrations to the test database."""
-    # Configure Alembic
-    config = Config(os.path.join(project_root, "alembic.ini"))
-
-    # Set the SQLAlchemy URL to the test database
-    config.set_main_option("sqlalchemy.url", str(db_engine.url))
-
-    # Run the migrations
-    upgrade(config, "head")
+    """Create all tables in the test database."""
+    from api.v1.models import *  # noqa: F401, F403 — ensure all models are registered
+    from api.v1.models.permissions.permissions import Permission  # noqa: F401
+    from api.v1.models.permissions.role import Role  # noqa: F401
+    from api.db.database import Base
+    Base.metadata.create_all(bind=db_engine)
     return
 
 
