@@ -33,14 +33,6 @@ jobs:
             # Navigate to production directory
             cd ~/anvila/backend/production
 
-            # Check for uncommitted local changes before proceeding
-            if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-              echo "⚠️  Warning: Uncommitted local changes detected on production server."
-              echo "These changes will be overwritten by the deployment."
-              git status --short
-              echo "Stashing local changes..."
-              git stash --include-untracked || true
-            fi
 
             # Snapshot current PM2 state for rollback
             echo "=== Snapshotting PM2 state ==="
@@ -50,7 +42,7 @@ jobs:
             # Pull latest code (safe sync with rebase)
             echo "=== Syncing code ==="
             git fetch origin main
-            git pull --rebase origin main
+            git reset --hard origin/main
 
             # Write .env file
             echo "${{ secrets.PROD_ENV_BASE64 }}" | base64 -d > .env
@@ -90,29 +82,6 @@ jobs:
             if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
               echo "❌ Health check failed after ${MAX_RETRIES} attempts. Rolling back..."
               pm2 resurrect || pm2 start "uv run uvicorn app.main:app --host 0.0.0.0 --port 8001" --name backend-production
-              echo "❌ Deployment FAILED - health check did not pass. Rolled back to previous state."
-              exit 1
-            fi
-
-            # Health check with retry
-            echo "=== Running Health Check ==="
-            MAX_RETRIES=15
-            RETRY_COUNT=0
-            HEALTH_PORT=8001
-
-            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-              if curl -sf "http://localhost:${HEALTH_PORT}/" > /dev/null 2>&1; then
-                echo "✅ Health check passed after $((RETRY_COUNT + 1)) attempt(s)"
-                break
-              fi
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              echo "⏳ Health check attempt ${RETRY_COUNT}/${MAX_RETRIES} failed, retrying in 2s..."
-              sleep 2
-            done
-
-            if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-              echo "❌ Health check failed after ${MAX_RETRIES} attempts. Rolling back..."
-              pm2 resurrect || pm2 restart backend-production --update-env
               echo "❌ Deployment FAILED - health check did not pass. Rolled back to previous state."
               exit 1
             fi

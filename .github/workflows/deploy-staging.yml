@@ -41,7 +41,7 @@ jobs:
             # Pull latest code (safe sync)
             echo "=== Syncing code ==="
             git fetch origin staging
-            git pull --rebase origin staging
+            git reset --hard origin/staging
 
             # Write .env file
             echo "${{ secrets.STAGING_ENV_BASE64 }}" | base64 -d > .env
