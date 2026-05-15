@@ -8,6 +8,12 @@ from sqlalchemy.orm import sessionmaker
 from decouple import config as decouple_config
 from datetime import datetime, timezone
 
+# Import all models so SQLAlchemy's metadata is fully populated before create_all()
+import api.v1.models  # noqa: F401
+from api.v1.models.permissions.permissions import Permission  # noqa: F401
+from api.v1.models.permissions.role import Role  # noqa: F401
+from api.db.database import Base
+
 
 
 # Global IP generator (supports 16 million+ unique IPs)
@@ -49,10 +55,6 @@ def db_engine():
 @pytest.fixture(scope="session")
 def apply_migrations(db_engine):
     """Create all tables in the test database."""
-    from api.v1.models import *  # noqa: F401, F403 — ensure all models are registered
-    from api.v1.models.permissions.permissions import Permission  # noqa: F401
-    from api.v1.models.permissions.role import Role  # noqa: F401
-    from api.db.database import Base
     Base.metadata.create_all(bind=db_engine)
     return
 
