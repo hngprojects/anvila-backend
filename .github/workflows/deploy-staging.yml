@@ -52,7 +52,7 @@ jobs:
 
             # Run database migrations (MUST succeed before proceeding)
             echo "=== Running Alembic Migrations ==="
-            uv run alembic upgrade head
+            PYTHONPATH=. uv run alembic upgrade head
 
             # Start or restart the application
             echo "=== Starting PM2 Process ==="
