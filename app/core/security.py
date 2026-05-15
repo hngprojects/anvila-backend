@@ -33,7 +33,7 @@ def create_token(subject: str, purpose: str, expires_delta: timedelta) -> str:
 
     return jwt.encode(
         payload,
-        settings.JWT_SECRET.get_secret_value(),
+        settings.JWT_SECRET,
         algorithm=settings.JWT_ALGORITHM,
     )
 

@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     DATABASE_URL: PostgresDsn
     LOG_LEVEL: str = "INFO"
 
+    JWT_SECRET: str
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_TTL_MINUTES: int = 60
+    REFRESH_TOKEN_TTL_DAYS: int = 7
+    TRUSTED_PROXIES: str = ""
+    COOKIE_SECURE: bool = False
+
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
     GOOGLE_REDIRECT_URI: str
