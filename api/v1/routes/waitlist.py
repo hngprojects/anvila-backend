@@ -153,8 +153,6 @@ def admin_add_user_to_waitlist(
         data={"email": item.email, "full_name": item.full_name},
     )
 
-    return JsonResponseDict(**resp)
-
 
 @waitlist.get("/users", response_model=success_response, status_code=200)
 async def get_all_waitlist_emails(
