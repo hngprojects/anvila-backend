@@ -64,12 +64,12 @@ async def register(
             display_name=body.display_name,
         )
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email already registered",
-        )
+        ) from e
 
     await db.refresh(user)
     bg_task.add_task(send_verification_email, user.email, verification_url)
@@ -128,7 +128,9 @@ async def resend_verification(
 
     # Intentionally vague — never reveal whether the address exists
     return ApiResponse[None](
-        message="If this email is registered and unverified, a new verification link has been sent.",
+        message=(
+            "If this email is registered and unverified, a new verification link has been sent."
+        ),
     )
 
 

@@ -89,3 +89,4 @@ def verify_password(password: str, password_hash: str) -> bool:
         return pwd_hash.verify(password, password_hash)
     except UnknownHashError:
         return False
+

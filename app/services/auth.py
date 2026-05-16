@@ -1,7 +1,7 @@
 import hashlib
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
 
@@ -21,7 +21,6 @@ from app.models.enums import UserProvider
 from app.models.password_reset_token import PasswordResetToken
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
-
 
 OAUTH_STATE_COOKIE = "oauth_state"
 COOKIE_PATH = f"{settings.API_V1_PREFIX}/auth"
@@ -61,9 +60,7 @@ async def register_user(
 
     raw_token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-    expires_at = datetime.now(timezone.utc) + timedelta(
-        hours=settings.VERIFICATION_TOKEN_EXPIRE_HOURS
-    )
+    expires_at = datetime.now(UTC) + timedelta(hours=settings.VERIFICATION_TOKEN_EXPIRE_HOURS)
 
     user = User(
         email=normalized_email,
@@ -97,7 +94,7 @@ async def verify_email(db: AsyncSession, raw_token: str) -> User:
         )
     if (
         user.verification_token_expires_at is None
-        or user.verification_token_expires_at < datetime.now(timezone.utc)
+        or user.verification_token_expires_at < datetime.now(UTC)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -120,9 +117,7 @@ async def resend_verification_email(db: AsyncSession, email: str) -> str | None:
 
     raw_token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-    expires_at = datetime.now(timezone.utc) + timedelta(
-        hours=settings.VERIFICATION_TOKEN_EXPIRE_HOURS
-    )
+    expires_at = datetime.now(UTC) + timedelta(hours=settings.VERIFICATION_TOKEN_EXPIRE_HOURS)
 
     user.verification_token_hash = token_hash
     user.verification_token_expires_at = expires_at
@@ -160,7 +155,7 @@ async def login_user(
     refresh_token_record = RefreshToken(
         token_hash=refresh_hash,
         user_id=user.id,
-        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        expires_at=datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
         user_agent=user_agent,
         ip_address=ip_address,
     )
@@ -191,7 +186,7 @@ async def refresh_access_token(db: AsyncSession, raw_refresh_token: str) -> str:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token has been revoked",
         )
-    if token_record.expires_at < datetime.now(timezone.utc):
+    if token_record.expires_at < datetime.now(UTC):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token has expired",
@@ -228,9 +223,7 @@ async def create_password_reset_token(db: AsyncSession, email: str) -> str | Non
 
     raw = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(raw.encode()).hexdigest()
-    expires_at = datetime.now(timezone.utc) + timedelta(
-        minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES
-    )
+    expires_at = datetime.now(UTC) + timedelta(minutes=settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES)
 
     reset_token = PasswordResetToken(
         user_id=user.id,
@@ -259,7 +252,7 @@ async def reset_password(
 
     if not token_record or token_record.used_at is not None:
         return False
-    if token_record.expires_at < datetime.now(timezone.utc):
+    if token_record.expires_at < datetime.now(UTC):
         return False
 
     user = await get_user_by_id(db, token_record.user_id)
@@ -267,7 +260,7 @@ async def reset_password(
         return False
 
     user.password_hash = hash_password(new_password)
-    token_record.used_at = datetime.now(timezone.utc)
+    token_record.used_at = datetime.now(UTC)
 
     # Revoke all active refresh tokens on password change
     await db.execute(
@@ -449,7 +442,7 @@ async def login_or_register_google_user(
     refresh_token_record = RefreshToken(
         token_hash=hashlib.sha256(raw_refresh.encode()).hexdigest(),
         user_id=user.id,
-        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        expires_at=datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
         user_agent=request.headers.get("user-agent"),
         ip_address=request.client.host if request.client else None,
     )
