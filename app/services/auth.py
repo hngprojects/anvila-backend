@@ -102,17 +102,20 @@ async def exchange_google_code(code: str) -> dict[str, Any]:
                 data=data,
                 headers={"Accept": "application/json"},
             )
-        except httpx.HTTPError as exc:
+
+            response.raise_for_status()
+
+        except httpx.HTTPStatusError as exc:
             raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Google token exchange failed",
+                status_code=exc.response.status_code,
+                detail=exc.response.text,
             ) from exc
 
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Google token exchange failed",
-        )
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unable to reach Google OAuth service",
+            ) from exc
 
     return response.json()
 
@@ -125,17 +128,18 @@ async def fetch_google_userinfo(access_token: str) -> dict[str, Any]:
                 settings.GOOGLE_USERINFO_URL,
                 headers={"Authorization": f"Bearer {access_token}"},
             )
-        except httpx.HTTPError as exc:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
             raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Google userinfo request failed",
+                status_code=exc.response.status_code,
+                detail=exc.response.text,
             ) from exc
 
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Google userinfo request failed",
-        )
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unable to reach Google OAuth service",
+            ) from exc
 
     return response.json()
 
@@ -186,18 +190,12 @@ async def login_or_register_google_user(
                 user = await get_user_by_email(db, email)
             if user is None:
                 raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Account already exists",
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to resolve user after concurrent OAuth registration",
                 ) from exc
             _apply_google_profile(user, str(subject), profile, google_verified)
-            try:
-                await db.commit()
-            except IntegrityError as exc:
-                await db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Account already exists",
-                ) from exc
+            
+            await db.commit()
 
         await db.refresh(user)
 
