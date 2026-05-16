@@ -115,6 +115,7 @@ async def resend_verification_email(db: AsyncSession, email: str) -> str | None:
     user.verification_token_hash = token_hash
     user.verification_token_expires_at = expires_at
     await db.flush()
+    await db.commit()
 
     return f"{settings.FRONTEND_URL}/verify-email?token={raw_token}"
 
@@ -125,7 +126,7 @@ async def login_user(
     password: str,
     user_agent: str | None = None,
     ip_address: str | None = None,
-) -> tuple[str, str]:
+) -> dict:
     user = await get_user_by_email(db, email.strip().lower())
     if not user or not user.password_hash or not verify_password(password, user.password_hash):
         raise HTTPException(
@@ -138,7 +139,7 @@ async def login_user(
             detail="Account is disabled",
         )
 
-    access_token = create_access_token({"sub": str(user.id)})
+    access_token = create_access_token(str(user.id))
     raw_refresh = secrets.token_urlsafe(32)
     refresh_hash = hashlib.sha256(raw_refresh.encode()).hexdigest()
 
@@ -152,7 +153,11 @@ async def login_user(
     db.add(refresh_token_record)
     await db.flush()
 
-    return access_token, raw_refresh
+    return {
+        "access_token": access_token,
+        "refresh_token": raw_refresh,
+        "user": user,
+    }
 
 
 async def refresh_access_token(
@@ -183,7 +188,7 @@ async def refresh_access_token(
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account is disabled")
 
-    return create_access_token({"sub": str(user.id)})
+    return create_access_token(str(user.id))
 
 
 async def logout_user(

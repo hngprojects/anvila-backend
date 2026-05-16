@@ -62,7 +62,7 @@ async def login(body: LoginRequest, request: Request, db: DBSession) -> ApiRespo
     user_agent = request.headers.get("user-agent")
     ip_address = request.client.host if request.client else None
 
-    access_token, raw_refresh = await auth_service.login_user(
+    result = await auth_service.login_user(
         db,
         email=body.email,
         password=body.password,
@@ -71,7 +71,9 @@ async def login(body: LoginRequest, request: Request, db: DBSession) -> ApiRespo
     )
     await db.commit()
 
-    user = await auth_service.get_user_by_email(db, body.email)
+    access_token = result["access_token"]
+    raw_refresh = result["refresh_token"]
+    user = result["user"]
 
     return ApiResponse[LoginData](
         message="Login successful.",
@@ -102,7 +104,6 @@ async def resend_verification(
     body: ResendVerificationRequest, db: DBSession, bg_task: BackgroundTasks
 ) -> ApiResponse[None]:
     verification_url = await auth_service.resend_verification_email(db, body.email)
-    await db.commit()
 
     if verification_url:
         bg_task.add_task(send_verification_email, body.email, verification_url)
@@ -138,12 +139,8 @@ async def forgot_password(
     raw_token = await auth_service.create_password_reset_token(db, body.email)
 
     if raw_token:
-        try:
-            # Fragment (#) keeps the token out of server logs and Referer headers
-            reset_url = f"{settings.FRONTEND_URL}/reset-password#token={raw_token}"
-            bg_task.add_task(send_password_reset_email, body.email, reset_url)
-        except Exception:
-            pass  # Never surface email-sending failures to the caller
+        reset_url = f"{settings.FRONTEND_URL}/reset-password#token={raw_token}"
+        bg_task.add_task(send_password_reset_email, body.email, reset_url)
 
     # Intentionally vague — never reveal whether the email exists or has a password account
     return ApiResponse[None](

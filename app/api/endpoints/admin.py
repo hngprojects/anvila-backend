@@ -17,7 +17,7 @@ async def admin_dashboard(current_user: AdminUser) -> dict:
     }
 
 
-@router.get("/users/me")
+@router.get("/me")
 async def admin_me(current_user: AdminUser) -> dict:
     return {
         "success": True,
