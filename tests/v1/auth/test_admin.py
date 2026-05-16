@@ -15,7 +15,8 @@ async def _create_verified_user_with_tokens(
     email: str,
     password: str = "ValidPass1!",
 ) -> tuple[User, str, str]:
-    await client.post(f"{BASE_AUTH}/register", json={"email": email, "password": password})
+    resp = await client.post(f"{BASE_AUTH}/register", json={"email": email, "password": password})
+    assert resp.status_code == 201
 
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one()

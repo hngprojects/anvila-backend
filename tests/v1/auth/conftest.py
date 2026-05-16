@@ -22,6 +22,12 @@ from app.models.base import Base  # noqa: E402
 
 TEST_DB_URL = os.environ["DATABASE_URL"]
 
+if "test" not in TEST_DB_URL.lower():
+    raise RuntimeError(
+        f"DATABASE_URL does not look like a test database: {TEST_DB_URL!r}. "
+        "Refusing to run destructive test operations against a non-test database."
+    )
+
 
 def _make_engine():
     return create_async_engine(TEST_DB_URL, echo=False, poolclass=NullPool)
@@ -64,6 +70,8 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
         yield db_session
 
     app.dependency_overrides[get_session] = _override_get_session
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
-    app.dependency_overrides.pop(get_session, None)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            yield ac
+    finally:
+        app.dependency_overrides.pop(get_session, None)
