@@ -1,6 +1,7 @@
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic import PostgresDsn, Field, field_validator
+from pydantic import Field, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,44 +13,39 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # ------------------------------------------------------------------
+    # App
+    # ------------------------------------------------------------------
     PROJECT_NAME: str = "anvila-backend"
     API_V1_PREFIX: str = "/api/v1"
     ADMIN_EMAIL: str | None = None
     ADMIN_PASSWORD: str | None = None
-
     DATABASE_URL: PostgresDsn
     LOG_LEVEL: str = "INFO"
-
-    JWT_SECRET: str
-    JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_TTL_MINUTES: int = Field(default=60, ge=1)
-    REFRESH_TOKEN_TTL_DAYS: int = Field(default=7, ge=1)
+    FRONTEND_URL: str = "http://localhost:3000"
     TRUSTED_PROXIES: str = ""
     COOKIE_SECURE: bool = True
 
+    # ------------------------------------------------------------------
+    # JWT / tokens
+    # ------------------------------------------------------------------
+    JWT_SECRET: Annotated[str, Field(min_length=32)]
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: Annotated[int, Field(gt=0)] = 60
+    REFRESH_TOKEN_EXPIRE_DAYS: Annotated[int, Field(gt=0)] = 7
+    VERIFICATION_TOKEN_EXPIRE_HOURS: Annotated[int, Field(gt=0)] = 24
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: Annotated[int, Field(gt=0)] = 60
+
+    # ------------------------------------------------------------------
+    # Google OAuth
+    # ------------------------------------------------------------------
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
     GOOGLE_REDIRECT_URI: str
-
     GOOGLE_AUTH_URL: str = "https://accounts.google.com/o/oauth2/v2/auth"
     GOOGLE_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
     GOOGLE_USERINFO_URL: str = "https://openidconnect.googleapis.com/v1/userinfo"
     GOOGLE_SCOPES: str = "openid email profile"
-
-
-    @field_validator(
-        "JWT_SECRET",
-        "GOOGLE_CLIENT_ID",
-        "GOOGLE_CLIENT_SECRET",
-        "GOOGLE_REDIRECT_URI",
-    )
-    @classmethod
-    def validate_required_strings(cls, value: str, info) -> str:
-        """Ensure required security and OAuth settings are not blank."""
-        if not value.strip():
-            raise ValueError(f"{info.field_name} cannot be blank")
-
-        return value
 
 
 @lru_cache

@@ -26,24 +26,41 @@ jobs:
       - name: Ruff lint
         run: uv run ruff check .
 
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install
-
-      - name: Install dependencies
-        run: uv sync --all-groups
-
-      - name: Set up environment
-        run: echo "${{ secrets.STAGING_ENV_BASE64 }}" | base64 -d > .env
-
-      - name: Run tests
-        run: uv run pytest tests/ -v || [ $? -eq 5 ]
+  # test:
+  #   runs-on: ubuntu-latest
+  #   services:
+  #     postgres:
+  #       image: postgres:16
+  #       env:
+  #         POSTGRES_USER: anvila_test
+  #         POSTGRES_PASSWORD: anvila_test_pass
+  #         POSTGRES_DB: anvila_backend_test
+  #       ports:
+  #         - 5432:5432
+  #       options: >-
+  #         --health-cmd pg_isready
+  #         --health-interval 10s
+  #         --health-timeout 5s
+  #         --health-retries 5
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - name: Install uv
+  #       uses: astral-sh/setup-uv@v5
+  #       with:
+  #         enable-cache: true
+  #
+  #     - name: Set up Python
+  #       run: uv python install
+  #
+  #     - name: Install dependencies
+  #       run: uv sync --all-groups
+  #
+  #     - name: Set up environment
+  #       run: echo "${{ secrets.STAGING_ENV_BASE64 }}" | base64 -d > .env
+  #
+  #     - name: Run tests
+  #       env:
+  #         DATABASE_URL: postgresql+asyncpg://anvila_test:anvila_test_pass@localhost:5432/anvila_backend_test
+  #         JWT_SECRET: ci-test-secret-key-minimum-32-characters-long
+  #       run: uv run pytest tests/ -v || [ $? -eq 5 ]

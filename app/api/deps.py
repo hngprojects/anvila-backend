@@ -26,13 +26,7 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    payload = decode_token(credentials.credentials)
-    if payload.get("purpose") != "access":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token purpose",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    payload = decode_token(credentials.credentials, expected_purpose="access")
     try:
         user_id = uuid.UUID(payload["sub"])
     except (KeyError, ValueError) as exc:
@@ -52,3 +46,19 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def get_current_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    # Gap 7/8 confirmed: delegates auth to get_current_user, only checks role here.
+    # Regular users are authenticated but not authorized → 403 not 401.
+    if not current_user.is_admin and not current_user.is_super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return current_user
+
+
+AdminUser = Annotated[User, Depends(get_current_admin)]
