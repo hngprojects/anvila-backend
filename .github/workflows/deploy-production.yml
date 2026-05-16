@@ -49,19 +49,18 @@ jobs:
 
             # Install all dependency groups (parity with CI)
             echo "=== Installing dependencies ==="
-            pip install -r requirements.txt
+            uv sync --all-groups
 
             # Run database migrations (MUST succeed before proceeding)
             echo "=== Running Alembic Migrations ==="
-            alembic upgrade head
+            PYTHONPATH=./app uv run alembic upgrade head
 
             # Start or restart the application
             echo "=== Starting PM2 Process ==="
             if pm2 describe backend-production > /dev/null 2>&1; then
-              pm2 restart backend-production --update-env
-            else
-              pm2 start "uvicorn app.main:app --host 0.0.0.0 --port 8001" --name backend-production
+              pm2 delete backend-production
             fi
+            pm2 start "uv run uvicorn app.main:app --host 0.0.0.0 --port 8001" --name backend-production
 
             # Health check with retry
             echo "=== Running Health Check ==="
@@ -81,7 +80,7 @@ jobs:
 
             if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
               echo "❌ Health check failed after ${MAX_RETRIES} attempts. Rolling back..."
-              pm2 resurrect || pm2 start "uvicorn app.main:app --host 0.0.0.0 --port 8001" --name backend-production
+              pm2 resurrect || pm2 start "uv run uvicorn app.main:app --host 0.0.0.0 --port 8001" --name backend-production
               echo "❌ Deployment FAILED - health check did not pass. Rolled back to previous state."
               exit 1
             fi
