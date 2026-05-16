@@ -43,3 +43,23 @@ class VerifyEmailRequest(BaseModel):
 
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+
+class MeResponse(BaseModel):
+    id: str
+    email: str
+    plan: str
+    is_admin: bool
+    is_super_admin: bool
+    email_verified: bool
+    created_at: str
+
+    model_config = {"from_attributes": True}

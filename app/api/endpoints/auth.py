@@ -1,10 +1,12 @@
 from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 
-from app.api.deps import DBSession
+from app.api.deps import CurrentUser, DBSession
 from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
+    LogoutRequest,
+    RefreshRequest,
     RegisterRequest,
     ResendVerificationRequest,
     TokenResponse,
@@ -73,3 +75,40 @@ async def resend_verification(body: ResendVerificationRequest, db: DBSession) ->
     await db.commit()
     if verification_url:
         await send_verification_email(body.email, verification_url)
+
+
+@router.post("/refresh")
+async def refresh_token_endpoint(body: RefreshRequest, db: DBSession) -> dict:
+    access_token = await auth_service.refresh_access_token(db, body.refresh_token)
+    return {
+        "success": True,
+        "data": {
+            "access_token": access_token,
+            "token_type": "bearer",
+        },
+    }
+
+
+@router.post("/logout", status_code=status.HTTP_200_OK)
+async def logout_endpoint(body: LogoutRequest, db: DBSession) -> dict:
+    await auth_service.logout_user(db, body.refresh_token)
+    await db.commit()
+    return {"success": True, "message": "Logged out successfully."}
+
+
+@router.get("/me")
+async def me_endpoint(current_user: CurrentUser) -> dict:
+    return {
+        "success": True,
+        "data": {
+            "id": str(current_user.id),
+            "email": current_user.email,
+            "plan": current_user.plan.value
+            if hasattr(current_user.plan, "value")
+            else current_user.plan,
+            "is_admin": current_user.is_admin,
+            "is_super_admin": current_user.is_super_admin,
+            "email_verified": current_user.email_verified,
+            "created_at": current_user.created_at.isoformat(),
+        },
+    }

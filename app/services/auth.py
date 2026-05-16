@@ -67,9 +67,7 @@ async def register_user(
 
 async def verify_email(db: AsyncSession, raw_token: str) -> User:
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-    result = await db.execute(
-        select(User).where(User.verification_token_hash == token_hash)
-    )
+    result = await db.execute(select(User).where(User.verification_token_hash == token_hash))
     user = result.scalar_one_or_none()
 
     if user is None:
@@ -82,8 +80,9 @@ async def verify_email(db: AsyncSession, raw_token: str) -> User:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already verified",
         )
-    if user.verification_token_expires_at is None or user.verification_token_expires_at < datetime.now(
-        timezone.utc
+    if (
+        user.verification_token_expires_at is None
+        or user.verification_token_expires_at < datetime.now(timezone.utc)
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -121,6 +120,48 @@ async def resend_verification_email(db: AsyncSession, email: str) -> str | None:
     await db.flush()
 
     return f"{settings.FRONTEND_URL}/verify-email?token={raw_token}"
+
+
+async def refresh_access_token(
+    db: AsyncSession,
+    raw_refresh_token: str,
+) -> str:
+    # Refresh tokens are opaque random strings (not JWTs) — hash and look up in DB.
+    token_hash = hashlib.sha256(raw_refresh_token.encode()).hexdigest()
+    result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    token_record = result.scalar_one_or_none()
+
+    if token_record is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token not found"
+        )
+    if token_record.revoked:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token has been revoked"
+        )
+    if token_record.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token has expired"
+        )
+
+    user = await get_user_by_id(db, token_record.user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    return create_access_token({"sub": str(user.id)})
+
+
+async def logout_user(
+    db: AsyncSession,
+    raw_refresh_token: str,
+) -> None:
+    token_hash = hashlib.sha256(raw_refresh_token.encode()).hexdigest()
+    result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
+    token_record = result.scalar_one_or_none()
+
+    if token_record and not token_record.revoked:
+        token_record.revoked = True
+        await db.flush()
 
 
 async def login_user(
