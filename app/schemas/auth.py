@@ -65,18 +65,6 @@ class LogoutRequest(BaseModel):
     refresh_token: str
 
 
-class MeResponse(BaseModel):
-    id: str
-    email: str
-    plan: str
-    is_admin: bool
-    is_super_admin: bool
-    email_verified: bool
-    created_at: str
-
-    model_config = {"from_attributes": True}
-
-
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
@@ -95,3 +83,25 @@ class ResetPasswordRequest(BaseModel):
         if not re.search(r"\d", v):
             raise ValueError("Password must contain at least one digit")
         return v
+
+
+class LoginData(BaseModel):
+    user: UserResponse
+    tokens: TokenResponse
+
+
+class MeResponse(BaseModel):
+    id: str
+    email: str
+    plan: str
+    is_admin: bool
+    is_super_admin: bool
+    email_verified: bool
+    created_at: str
+
+    model_config = {"from_attributes": True}
+
+
+class RefreshData(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
