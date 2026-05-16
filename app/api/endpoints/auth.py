@@ -25,11 +25,6 @@ from app.services.email import send_password_reset_email, send_verification_emai
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-# ---------------------------------------------------------------------------
-# POST /register
-# ---------------------------------------------------------------------------
-
-
 @router.post(
     "/register",
     response_model=ApiResponse[UserResponse],
