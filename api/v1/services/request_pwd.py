@@ -24,12 +24,7 @@ PASSWORD_RESET_TOKEN_TTL_MINUTES = 5
 
 class RequestPasswordService(Service):
     def fetch(self, email: str, db: Annotated[Session, Depends(get_db)]):
-        user = db.query(User).filter_by(email=email).one_or_none()
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-            )
-        return user
+        return db.query(User).filter_by(email=email).one_or_none()
 
     def create(self, user: User, db: Annotated[Session, Depends(get_db)]) -> str:
         # Delete any existing tokens for this user so there is only ever one active.
