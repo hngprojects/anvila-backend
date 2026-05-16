@@ -6,8 +6,10 @@ from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
     RegisterRequest,
+    ResendVerificationRequest,
     TokenResponse,
     UserResponse,
+    VerifyEmailRequest,
 )
 from app.services import auth as auth_service
 
@@ -46,3 +48,17 @@ async def login(body: LoginRequest, request: Request, db: DBSession) -> LoginRes
         user=UserResponse.model_validate(result),
         tokens=TokenResponse(access_token=access_token, refresh_token=raw_refresh),
     )
+
+
+@router.post("/verify-email", response_model=UserResponse)
+async def verify_email(body: VerifyEmailRequest, db: DBSession) -> UserResponse:
+    user = await auth_service.verify_email(db, body.token)
+    await db.commit()
+    await db.refresh(user)
+    return UserResponse.model_validate(user)
+
+
+@router.post("/resend-verification", status_code=status.HTTP_204_NO_CONTENT)
+async def resend_verification(body: ResendVerificationRequest, db: DBSession) -> None:
+    await auth_service.resend_verification_email(db, body.email)
+    await db.commit()

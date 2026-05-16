@@ -66,6 +66,64 @@ async def register_user(
     return user
 
 
+async def verify_email(db: AsyncSession, raw_token: str) -> User:
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    result = await db.execute(
+        select(User).where(User.verification_token_hash == token_hash)
+    )
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification token",
+        )
+    if user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already verified",
+        )
+    if user.verification_token_expires_at is None or user.verification_token_expires_at < datetime.now(
+        timezone.utc
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification token has expired",
+        )
+
+    user.email_verified = True
+    user.verification_token_hash = None
+    user.verification_token_expires_at = None
+    await db.flush()
+
+    return user
+
+
+async def resend_verification_email(db: AsyncSession, email: str) -> None:
+    user = await get_user_by_email(db, email)
+    if user is None or not user.is_active:
+        return
+
+    if user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already verified",
+        )
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        hours=settings.VERIFICATION_TOKEN_EXPIRE_HOURS
+    )
+
+    user.verification_token_hash = token_hash
+    user.verification_token_expires_at = expires_at
+    await db.flush()
+
+    verification_url = f"{settings.FRONTEND_URL}/verify-email?token={raw_token}"
+    await send_verification_email(email, verification_url)
+
+
 async def login_user(
     db: AsyncSession,
     email: str,
