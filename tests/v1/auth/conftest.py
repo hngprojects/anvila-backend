@@ -4,9 +4,9 @@ import os
 
 os.environ.setdefault(
     "DATABASE_URL",
-    "postgresql+asyncpg://anvila_user:anvila_pass_2026@localhost:5432/anvila_backend_test",
+    "postgresql+asyncpg://anvila_test:anvila_test_pass@localhost:5432/anvila_backend_test",
 )
-os.environ.setdefault("JWT_SECRET", "test-secret-key-for-pytest-do-not-use-in-prod")
+os.environ.setdefault("JWT_SECRET", "ci-test-secret-key-minimum-32-characters-long")
 
 from collections.abc import AsyncGenerator  # noqa: E402
 
