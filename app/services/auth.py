@@ -195,7 +195,13 @@ async def login_or_register_google_user(
                 ) from exc
             _apply_google_profile(user, str(subject), profile, google_verified)
             
-            await db.commit()
+            try:
+                await db.commit()
+            except IntegrityError as inner_exc:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Google account already linked to another user",
+                ) from inner_exc
 
         await db.refresh(user)
 
@@ -205,15 +211,11 @@ async def login_or_register_google_user(
             detail="Account is disabled",
         )
 
-    access_token, raw_refresh = await issue_auth_tokens(db, user, request)
+    access_token, raw_refresh = await issue_auth_tokens(user)
 
     return access_token, raw_refresh, user
 
-async def issue_auth_tokens(
-    db: AsyncSession,
-    user: User,
-    request: Request,
-) -> tuple[str, str]:
+async def issue_auth_tokens(user: User) -> tuple[str, str]:
     access_token = create_access_token(subject=str(user.id))
     raw_refresh = create_refresh_token(subject=str(user.id))
     return access_token, raw_refresh

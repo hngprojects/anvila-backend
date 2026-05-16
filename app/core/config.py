@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import PostgresDsn, Field
+from pydantic import PostgresDsn, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,6 +35,21 @@ class Settings(BaseSettings):
     GOOGLE_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
     GOOGLE_USERINFO_URL: str = "https://openidconnect.googleapis.com/v1/userinfo"
     GOOGLE_SCOPES: str = "openid email profile"
+
+
+    @field_validator(
+        "JWT_SECRET",
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "GOOGLE_REDIRECT_URI",
+    )
+    @classmethod
+    def validate_required_strings(cls, value: str, info) -> str:
+        """Ensure required security and OAuth settings are not blank."""
+        if not value.strip():
+            raise ValueError(f"{info.field_name} cannot be blank")
+
+        return value
 
 
 @lru_cache
