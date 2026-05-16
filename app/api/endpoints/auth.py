@@ -24,13 +24,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest, db: DBSession) -> UserResponse:
-    user, verification_url = await auth_service.register_user(
-        db,
-        email=body.email,
-        password=body.password,
-        display_name=body.display_name,
-    )
     try:
+        user, verification_url = await auth_service.register_user(
+            db,
+            email=body.email,
+            password=body.password,
+            display_name=body.display_name,
+        )
         await db.commit()
     except IntegrityError:
         await db.rollback()

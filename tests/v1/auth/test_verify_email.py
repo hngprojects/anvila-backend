@@ -136,7 +136,7 @@ async def test_resend_verification_unknown_email_returns_204(client: AsyncClient
     assert resp.status_code == 204
 
 
-async def test_resend_verification_already_verified_returns_400(
+async def test_resend_verification_already_verified_returns_204(
     client: AsyncClient, db_session: AsyncSession
 ):
     await _register(client, "resend_verified@example.com")
@@ -148,8 +148,7 @@ async def test_resend_verification_already_verified_returns_400(
     resp = await client.post(
         f"{BASE}/resend-verification", json={"email": "resend_verified@example.com"}
     )
-    assert resp.status_code == 400
-    assert "already verified" in resp.json()["detail"]
+    assert resp.status_code == 204
 
 
 async def test_resend_verification_refreshes_token(client: AsyncClient, db_session: AsyncSession):

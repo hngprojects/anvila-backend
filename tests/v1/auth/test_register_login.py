@@ -153,6 +153,7 @@ async def test_login_access_token_is_jwt(client: AsyncClient):
         f"{BASE}/login",
         json={"email": "jwt@example.com", "password": "Strongpass1"},
     )
+    assert resp.status_code == 200
     token = resp.json()["tokens"]["access_token"]
     parts = token.split(".")
     assert len(parts) == 3, "Access token should be a three-part JWT"

@@ -104,10 +104,7 @@ async def resend_verification_email(db: AsyncSession, email: str) -> str | None:
         return None
 
     if user.email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already verified",
-        )
+        return None
 
     raw_token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
@@ -183,6 +180,8 @@ async def refresh_access_token(
     user = await get_user_by_id(db, token_record.user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account is disabled")
 
     return create_access_token({"sub": str(user.id)})
 

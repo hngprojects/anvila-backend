@@ -18,7 +18,8 @@ async def _create_verified_user_with_tokens(
     email: str = "refresh@test.com",
     password: str = "ValidPass1!",
 ) -> tuple[User, str, str]:
-    await client.post(f"{BASE}/register", json={"email": email, "password": password})
+    resp = await client.post(f"{BASE}/register", json={"email": email, "password": password})
+    assert resp.status_code == 201
 
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one()
@@ -79,7 +80,8 @@ async def test_refresh_revoked_token(client: AsyncClient, db_session: AsyncSessi
         client, db_session, email="revoked@test.com"
     )
 
-    await client.post(f"{BASE}/logout", json={"refresh_token": raw_refresh})
+    logout_resp = await client.post(f"{BASE}/logout", json={"refresh_token": raw_refresh})
+    assert logout_resp.status_code == 200
 
     resp = await client.post(f"{BASE}/refresh", json={"refresh_token": raw_refresh})
     assert resp.status_code == 401

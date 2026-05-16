@@ -1,4 +1,6 @@
 import hashlib
+import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from httpx import AsyncClient
@@ -24,15 +26,16 @@ async def _register_and_verify(
     user = result.scalar_one()
     user.email_verified = True
     await db.commit()
+    await db.refresh(user)
     return user
 
 
 async def _create_reset_token(
     db: AsyncSession,
-    user_id,
+    user_id: uuid.UUID,
     minutes_until_expiry: int = 60,
 ) -> tuple[str, PasswordResetToken]:
-    raw = "test-reset-token-exactly-32-chars-x"
+    raw = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(raw.encode()).hexdigest()
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=minutes_until_expiry)
     record = PasswordResetToken(
@@ -42,6 +45,7 @@ async def _create_reset_token(
     )
     db.add(record)
     await db.commit()
+    await db.refresh(record)
     return raw, record
 
 
