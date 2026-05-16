@@ -92,11 +92,17 @@ async def exchange_google_code(code: str) -> dict[str, Any]:
     }
 
     async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.post(
-            settings.GOOGLE_TOKEN_URL,
-            data=data,
-            headers={"Accept": "application/json"},
-        )
+        try:
+            response = await client.post(
+                settings.GOOGLE_TOKEN_URL,
+                data=data,
+                headers={"Accept": "application/json"},
+            )
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Google token exchange failed",
+            ) from exc
 
     if response.status_code != 200:
         raise HTTPException(
@@ -109,10 +115,16 @@ async def exchange_google_code(code: str) -> dict[str, Any]:
 
 async def fetch_google_userinfo(access_token: str) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=10) as client:
-        response = await client.get(
-            settings.GOOGLE_USERINFO_URL,
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
+        try:
+            response = await client.get(
+                settings.GOOGLE_USERINFO_URL,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Google userinfo request failed",
+            ) from exc
 
     if response.status_code != 200:
         raise HTTPException(
@@ -163,6 +175,7 @@ async def login_or_register_google_user(
             await db.commit()
         except IntegrityError as exc:
             await db.rollback()
+            user = await get_user_by_google_subject(db, str(subject))
             if user is None:
                 user = await get_user_by_email(db, email)
             if user is None:
@@ -170,7 +183,7 @@ async def login_or_register_google_user(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Account already exists",
                 ) from exc
-            _apply_google_profile(user, subject, profile, google_verified)
+            _apply_google_profile(user, str(subject), profile, google_verified)
             try:
                 await db.commit()
             except IntegrityError as exc:
@@ -205,14 +218,14 @@ def create_access_token(subject: str) -> str:
     return create_token(
         subject=subject,
         purpose="access",
-        expires_delta=timedelta(minutes=15),
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_TTL_MINUTES),
     )
 
 def create_refresh_token(subject: str) -> str:
     return create_token(
         subject=subject,
         purpose="refresh",
-        expires_delta=timedelta(days=30),
+        expires_delta=timedelta(days=settings.REFRESH_TOKEN_TTL_DAYS),
     )
 
 def _apply_google_profile(

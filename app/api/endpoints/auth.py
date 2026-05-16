@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Cookie, Query, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 
 from app.core.security import create_oauth_state_token, decode_token
 from app.services.auth import (
@@ -95,6 +96,15 @@ async def google_callback(
 
         return TokenResponse(access_token=access_token)
 
-    except HTTPException:
-        clear_oauth_state_cookie(response)
-        raise
+    except HTTPException as exc:
+        error_response = JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "status": "error",
+                "message": exc.detail,
+            },
+        )
+
+        clear_oauth_state_cookie(error_response)
+
+        return error_response

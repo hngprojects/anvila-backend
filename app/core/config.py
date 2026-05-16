@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import PostgresDsn
+from pydantic import PostgresDsn, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,10 +22,10 @@ class Settings(BaseSettings):
 
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_TTL_MINUTES: int = 60
-    REFRESH_TOKEN_TTL_DAYS: int = 7
+    ACCESS_TOKEN_TTL_MINUTES: int = Field(default=60, ge=1)
+    REFRESH_TOKEN_TTL_DAYS: int = Field(default=7, ge=1)
     TRUSTED_PROXIES: str = ""
-    COOKIE_SECURE: bool = False
+    COOKIE_SECURE: bool = True
 
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str

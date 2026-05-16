@@ -10,13 +10,18 @@ from app.core.config import settings
 pwd_hash = PasswordHash.recommended()
 
 
-def decode_token(token: str) -> dict:
+def decode_token(token: str, expected_purpose: str | None = None) -> dict[str, Any]:
     try:
         payload = jwt.decode(
             token,
             settings.JWT_SECRET,
             algorithms=[settings.JWT_ALGORITHM],
         )
+        if expected_purpose and payload.get("purpose") != expected_purpose:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token",
+            )
 
         return payload
 
