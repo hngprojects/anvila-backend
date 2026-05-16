@@ -46,3 +46,23 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def get_current_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    Dependency that requires the current user to be an admin
+    or super admin. Raises 403 if not.
+    Regular users get 403, not 401 — they are authenticated
+    but not authorized.
+    """
+    if not current_user.is_admin and not current_user.is_super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return current_user
+
+
+AdminUser = Annotated[User, Depends(get_current_admin)]
