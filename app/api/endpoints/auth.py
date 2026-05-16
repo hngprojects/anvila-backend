@@ -20,6 +20,7 @@ router = APIRouter()
 
 @router.get("/google", summary="Start Google OAuth flow")
 async def google_start(response: Response) -> Response:
+    """Start the Google OAuth flow and redirect the user to Google."""
     state = create_oauth_state_token()
     
     set_oauth_state_cookie(response, state)
@@ -46,6 +47,7 @@ async def google_callback(
     error_description: str | None = Query(default=None),
     state_cookie: str | None = Cookie(default=None, alias=OAUTH_STATE_COOKIE),
 ) -> TokenResponse:
+    """Handle Google OAuth callback, validate state, issue tokens, and clear cookies."""
     try:
         if error:
             raise HTTPException(

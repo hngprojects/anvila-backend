@@ -11,6 +11,7 @@ pwd_hash = PasswordHash.recommended()
 
 
 def decode_token(token: str, expected_purpose: str | None = None) -> dict[str, Any]:
+    """Decode and validate a signed JWT token."""
     try:
         payload = jwt.decode(
             token,
@@ -62,6 +63,7 @@ def create_token(subject: str, purpose: str, expires_delta: timedelta) -> str:
 
 
 def create_oauth_state_token() -> str:
+    """Create a short-lived signed token used to protect OAuth redirects from CSRF."""
     return create_token(
         subject=secrets.token_urlsafe(32),
         purpose="oauth_state",

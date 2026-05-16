@@ -47,6 +47,7 @@ def set_refresh_token_cookie(response: Response, refresh_token: str) -> None:
     )
 
 def set_oauth_state_cookie(response: Response, state: str) -> None:
+    """Store the OAuth state token in an HttpOnly cookie for callback validation."""
     response.set_cookie(
         key=OAUTH_STATE_COOKIE,
         value=state,
@@ -59,6 +60,7 @@ def set_oauth_state_cookie(response: Response, state: str) -> None:
 
 
 def clear_oauth_state_cookie(response: Response) -> None:
+    """Remove the OAuth state cookie after the OAuth flow completes or fails."""
     response.delete_cookie(
         key=OAUTH_STATE_COOKIE,
         path=COOKIE_PATH,
@@ -69,6 +71,7 @@ def clear_oauth_state_cookie(response: Response) -> None:
 
 
 def build_google_auth_url(state: str) -> str:
+    """Build the Google OAuth authorization URL with the required query parameters."""
     params = {
         "client_id": settings.GOOGLE_CLIENT_ID,
         "redirect_uri": settings.GOOGLE_REDIRECT_URI,
@@ -83,6 +86,7 @@ def build_google_auth_url(state: str) -> str:
 
 
 async def exchange_google_code(code: str) -> dict[str, Any]:
+    """Exchange a Google OAuth authorization code for a token response."""
     data = {
         "code": code,
         "client_id": settings.GOOGLE_CLIENT_ID,
@@ -114,6 +118,7 @@ async def exchange_google_code(code: str) -> dict[str, Any]:
 
 
 async def fetch_google_userinfo(access_token: str) -> dict[str, Any]:
+    """Fetch the user's profile information from Google using the access token."""
     async with httpx.AsyncClient(timeout=10) as client:
         try:
             response = await client.get(
@@ -140,6 +145,7 @@ async def login_or_register_google_user(
     profile: dict[str, Any],
     request: Request,
 ) -> tuple[str, str, User]:
+    """Create or retrieve a Google-authenticated user and issue application tokens."""
     subject = profile.get("sub")
     email = profile.get("email")
 
