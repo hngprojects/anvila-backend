@@ -1,9 +1,19 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Cookie,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DBSession
 from app.core.config import settings
-from app.schemas.shared import ApiResponse
+from app.core.security import create_oauth_state_token, decode_token
 from app.schemas.auth import (
     ForgotPasswordRequest,
     LoginData,
@@ -19,8 +29,21 @@ from app.schemas.auth import (
     UserResponse,
     VerifyEmailRequest,
 )
+from app.schemas.shared import ApiResponse
 from app.services import auth as auth_service
+from app.services.auth import (
+    OAUTH_STATE_COOKIE,
+    clear_oauth_state_cookie,
+    set_oauth_state_cookie,
+    set_refresh_token_cookie,
+)
 from app.services.email import send_password_reset_email, send_verification_email
+from app.services.google_oauth import (
+    build_google_auth_url,
+    exchange_google_code,
+    fetch_google_userinfo,
+    login_or_register_google_user,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -41,12 +64,12 @@ async def register(
             display_name=body.display_name,
         )
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Email already registered",
-        )
+        ) from e
 
     await db.refresh(user)
     bg_task.add_task(send_verification_email, user.email, verification_url)
@@ -69,19 +92,14 @@ async def login(body: LoginRequest, request: Request, db: DBSession) -> ApiRespo
         user_agent=user_agent,
         ip_address=ip_address,
     )
-    await db.commit()
-
-    access_token = result["access_token"]
-    raw_refresh = result["refresh_token"]
-    user = result["user"]
 
     return ApiResponse[LoginData](
         message="Login successful.",
         data=LoginData(
-            user=UserResponse.model_validate(user),
+            user=UserResponse.model_validate(result["user"]),
             tokens=TokenResponse(
-                access_token=access_token,
-                refresh_token=raw_refresh,
+                access_token=result["access_token"],
+                refresh_token=result["refresh_token"],
             ),
         ),
     )
@@ -110,7 +128,9 @@ async def resend_verification(
 
     # Intentionally vague — never reveal whether the address exists
     return ApiResponse[None](
-        message="If this email is registered and unverified, a new verification link has been sent.",
+        message=(
+            "If this email is registered and unverified, a new verification link has been sent."
+        ),
     )
 
 
@@ -176,3 +196,78 @@ async def me_endpoint(current_user: CurrentUser) -> ApiResponse[MeResponse]:
             created_at=current_user.created_at.isoformat(),
         ),
     )
+
+
+# OAuth
+# ==============
+@router.get("/google", summary="Start Google OAuth flow")
+async def google_start(response: Response) -> Response:
+    """Redirect the user to Google's consent screen."""
+    state = create_oauth_state_token()
+    set_oauth_state_cookie(response, state)
+    response.status_code = status.HTTP_307_TEMPORARY_REDIRECT
+    response.headers["Location"] = build_google_auth_url(state)
+    return response
+
+
+@router.get("/google/callback", summary="Handle Google OAuth callback")
+async def google_callback(
+    request: Request,
+    response: Response,
+    db: DBSession,
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+    error_description: str | None = Query(default=None),
+    state_cookie: str | None = Cookie(default=None, alias=OAUTH_STATE_COOKIE),
+) -> TokenResponse:
+    """Validate state, exchange code for tokens, issue app tokens, clear cookies."""
+    try:
+        if error:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_description or "Google OAuth failed",
+            )
+
+        if not code or not state or not state_cookie:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing OAuth parameters",
+            )
+
+        if state != state_cookie:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid OAuth state",
+            )
+
+        decode_token(state, expected_purpose="oauth_state")
+
+        token_payload = await exchange_google_code(code)
+        google_access_token = token_payload.get("access_token")
+
+        if not google_access_token:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Google token response missing access token",
+            )
+
+        profile = await fetch_google_userinfo(google_access_token)
+        access_token, raw_refresh, _ = await login_or_register_google_user(
+            db=db,
+            profile=profile,
+            request=request,
+        )
+
+        set_refresh_token_cookie(response, raw_refresh)
+        clear_oauth_state_cookie(response)
+
+        return TokenResponse(access_token=access_token, refresh_token=raw_refresh)
+
+    except HTTPException as exc:
+        error_response = JSONResponse(
+            status_code=exc.status_code,
+            content={"success": False, "message": exc.detail},
+        )
+        clear_oauth_state_cookie(error_response)
+        return error_response  # pyright: ignore[reportReturnType]

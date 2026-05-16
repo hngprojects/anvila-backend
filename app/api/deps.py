@@ -10,7 +10,6 @@ from app.db.session import get_session
 from app.models.user import User
 from app.services.auth import get_user_by_id
 
-
 _bearer = HTTPBearer(auto_error=False)
 
 DBSession = Annotated[AsyncSession, Depends(get_session)]
@@ -48,11 +47,7 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-async def get_current_admin(
-    current_user: User = Depends(get_current_user),
-) -> User:
-    # Gap 7/8 confirmed: delegates auth to get_current_user, only checks role here.
-    # Regular users are authenticated but not authorized → 403 not 401.
+async def get_current_admin(current_user: CurrentUser) -> User:
     if not current_user.is_admin and not current_user.is_super_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

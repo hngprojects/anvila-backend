@@ -14,9 +14,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.core.config import settings
+from app.core.security import hash_password
 from app.models.enums import UserPlan, UserProvider
 from app.models.user import User
-from app.core.security import hash_password
 
 
 async def create_or_update_admin(session: AsyncSession, email: str, password: str) -> None:
