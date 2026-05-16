@@ -1,6 +1,6 @@
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, List
 
 from fastapi import Depends, HTTPException, status
@@ -37,7 +37,7 @@ class RequestPasswordService(Service):
 
         raw = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(raw.encode()).hexdigest()
-        expires_at = datetime.utcnow() + timedelta(
+        expires_at = datetime.now(timezone.utc) + timedelta(
             minutes=PASSWORD_RESET_TOKEN_TTL_MINUTES
         )
 
@@ -77,7 +77,8 @@ class RequestPasswordService(Service):
                 detail="reset token already used",
             )
 
-        if user_token.expires_at < datetime.utcnow():
+        now = datetime.now(timezone.utc)
+        if user_token.expires_at < now:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="reset token invalid",
@@ -88,7 +89,7 @@ class RequestPasswordService(Service):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
 
         user.password = user_service.hash_password(reset_password_data.new_password)
-        user_token.used_at = datetime.utcnow()
+        user_token.used_at = now
         db.commit()
 
         access_token = user_service.create_access_token(user_token.user_id)
