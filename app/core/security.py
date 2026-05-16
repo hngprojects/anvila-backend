@@ -4,14 +4,32 @@ from pwdlib.exceptions import UnknownHashError
 import secrets
 from datetime import UTC, datetime, timedelta
 import jwt
+from fastapi import HTTPException, status
 from app.core.config import settings
 
 pwd_hash = PasswordHash.recommended()
 
 
-def decode_token(token: str) -> dict[str, Any]:
-    # TODO: Implement
-    return {"user_id": 1}
+def decode_token(token: str) -> dict:
+    try:
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+
+        return payload
+
+    except jwt.ExpiredSignatureError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+        ) from exc
+    except jwt.InvalidTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+        ) from exc
 
 
 def hash_password(password: str) -> str:
