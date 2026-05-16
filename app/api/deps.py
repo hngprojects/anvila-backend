@@ -26,13 +26,7 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    payload = decode_token(credentials.credentials)
-    if payload.get("purpose") != "access":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token purpose",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    payload = decode_token(credentials.credentials, expected_purpose="access")
     try:
         user_id = uuid.UUID(payload["sub"])
     except (KeyError, ValueError) as exc:

@@ -1,2 +1,7 @@
+import logging
+
+_log = logging.getLogger(__name__)
+
+
 async def send_verification_email(email: str, verification_url: str) -> None:
-    print(f"[DEV] Verify email link for {email}: {verification_url}", flush=True)
+    _log.debug("[DEV] Verification email dispatched (recipient redacted)")

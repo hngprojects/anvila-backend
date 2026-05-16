@@ -27,15 +27,22 @@ def create_refresh_token(payload: dict) -> str:
     return jwt.encode(data, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
-def decode_token(token: str) -> dict[str, Any]:
+def decode_token(token: str, expected_purpose: str | None = None) -> dict[str, Any]:
     try:
-        return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
     except JWTError:
         raise HTTPException(
             status_code=401,
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if expected_purpose is not None and payload.get("purpose") != expected_purpose:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token purpose",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return payload
 
 
 def hash_password(password: str) -> str:

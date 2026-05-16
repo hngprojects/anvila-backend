@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Request, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, HTTPException, Request, status
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import DBSession
 from app.schemas.auth import (
@@ -12,20 +12,29 @@ from app.schemas.auth import (
     VerifyEmailRequest,
 )
 from app.services import auth as auth_service
+from app.services.email import send_verification_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest, db: DBSession) -> UserResponse:
-    user = await auth_service.register_user(
+    user, verification_url = await auth_service.register_user(
         db,
         email=body.email,
         password=body.password,
         display_name=body.display_name,
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        )
     await db.refresh(user)
+    await send_verification_email(user.email, verification_url)
     return UserResponse.model_validate(user)
 
 
@@ -60,5 +69,7 @@ async def verify_email(body: VerifyEmailRequest, db: DBSession) -> UserResponse:
 
 @router.post("/resend-verification", status_code=status.HTTP_204_NO_CONTENT)
 async def resend_verification(body: ResendVerificationRequest, db: DBSession) -> None:
-    await auth_service.resend_verification_email(db, body.email)
+    verification_url = await auth_service.resend_verification_email(db, body.email)
     await db.commit()
+    if verification_url:
+        await send_verification_email(body.email, verification_url)

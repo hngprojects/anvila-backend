@@ -17,7 +17,6 @@ from app.core.security import (
 from app.models.enums import UserProvider
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
-from app.services.email import send_verification_email
 
 
 async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
@@ -26,7 +25,8 @@ async def get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
 
 
 async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
-    result = await db.execute(select(User).where(User.email == email))
+    normalized = email.strip().lower()
+    result = await db.execute(select(User).where(User.email == normalized))
     return result.scalar_one_or_none()
 
 
@@ -35,8 +35,9 @@ async def register_user(
     email: str,
     password: str,
     display_name: str | None = None,
-) -> User:
-    existing = await get_user_by_email(db, email)
+) -> tuple[User, str]:
+    normalized_email = email.strip().lower()
+    existing = await get_user_by_email(db, normalized_email)
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -50,7 +51,7 @@ async def register_user(
     )
 
     user = User(
-        email=email,
+        email=normalized_email,
         password_hash=hash_password(password),
         display_name=display_name,
         provider=UserProvider.EMAIL,
@@ -61,9 +62,7 @@ async def register_user(
     await db.flush()
 
     verification_url = f"{settings.FRONTEND_URL}/verify-email?token={raw_token}"
-    await send_verification_email(email, verification_url)
-
-    return user
+    return user, verification_url
 
 
 async def verify_email(db: AsyncSession, raw_token: str) -> User:
@@ -99,10 +98,11 @@ async def verify_email(db: AsyncSession, raw_token: str) -> User:
     return user
 
 
-async def resend_verification_email(db: AsyncSession, email: str) -> None:
+async def resend_verification_email(db: AsyncSession, email: str) -> str | None:
+    """Returns the verification URL to send, or None if the account is unknown/inactive."""
     user = await get_user_by_email(db, email)
     if user is None or not user.is_active:
-        return
+        return None
 
     if user.email_verified:
         raise HTTPException(
@@ -120,8 +120,7 @@ async def resend_verification_email(db: AsyncSession, email: str) -> None:
     user.verification_token_expires_at = expires_at
     await db.flush()
 
-    verification_url = f"{settings.FRONTEND_URL}/verify-email?token={raw_token}"
-    await send_verification_email(email, verification_url)
+    return f"{settings.FRONTEND_URL}/verify-email?token={raw_token}"
 
 
 async def login_user(
@@ -131,7 +130,7 @@ async def login_user(
     user_agent: str | None = None,
     ip_address: str | None = None,
 ) -> tuple[str, str]:
-    user = await get_user_by_email(db, email)
+    user = await get_user_by_email(db, email.strip().lower())
     if not user or not user.password_hash or not verify_password(password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

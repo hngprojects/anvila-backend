@@ -1,5 +1,4 @@
 import asyncio
-import logging.config
 import os
 
 os.environ.setdefault(
@@ -14,6 +13,8 @@ import pytest  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
 from sqlalchemy.pool import NullPool  # noqa: E402
+
+from sqlalchemy import text  # noqa: E402
 
 from app.db.session import get_session  # noqa: E402
 from app.main import app  # noqa: E402
@@ -51,6 +52,9 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as session:
         yield session
+    table_names = ", ".join(t.name for t in Base.metadata.sorted_tables)
+    async with engine.begin() as conn:
+        await conn.execute(text(f"TRUNCATE {table_names} RESTART IDENTITY CASCADE"))
     await engine.dispose()
 
 
