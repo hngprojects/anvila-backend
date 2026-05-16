@@ -1,13 +1,41 @@
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+import jwt
+from fastapi import HTTPException
 from pwdlib import PasswordHash
 from pwdlib.exceptions import UnknownHashError
+
+from app.core.config import settings
 
 pwd_hash = PasswordHash.recommended()
 
 
-def decode_token(token: str) -> dict[str, Any]:
-    # TODO: Implement
-    return {"user_id": 1}
+def create_access_token(payload: dict) -> str:
+    data = payload.copy()
+    data["exp"] = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+    data["purpose"] = "access"
+    return jwt.encode(data, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_token(token: str, expected_purpose: str | None = None) -> dict[str, Any]:
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if expected_purpose is not None and payload.get("purpose") != expected_purpose:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token purpose",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return payload
 
 
 def hash_password(password: str) -> str:
