@@ -1,0 +1,88 @@
+name: Deploy Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: "production"
+      url: "https://api.anvila.hng14.com"
+
+    steps:
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
+          script: |
+            set -e
+
+            echo "=== Deploying Backend Production ==="
+
+            # Navigate to production directory
+            cd ~/anvila/backend/production
+
+
+            # Snapshot current PM2 state for rollback
+            echo "=== Snapshotting PM2 state ==="
+            pm2 save || true
+            PM2_SNAPSHOT=$(pm2 describe backend-production 2>/dev/null | grep "restarts" || echo "no-prior-process")
+
+            # Pull latest code (safe sync with rebase)
+            echo "=== Syncing code ==="
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Write .env file
+            echo "${{ secrets.PROD_ENV_BASE64 }}" | base64 -d > .env
+
+            # Install all dependency groups (parity with CI)
+            echo "=== Installing dependencies ==="
+            uv sync --all-groups
+
+            # Run database migrations (MUST succeed before proceeding)
+            echo "=== Running Alembic Migrations ==="
+            PYTHONPATH=./app uv run alembic upgrade head
+
+            # Start or restart the application
+            echo "=== Starting PM2 Process ==="
+            if pm2 describe backend-production > /dev/null 2>&1; then
+              pm2 delete backend-production
+            fi
+            pm2 start "uv run uvicorn app.main:app --host 0.0.0.0 --port 8001" --name backend-production
+
+            # Health check with retry
+            echo "=== Running Health Check ==="
+            MAX_RETRIES=15
+            RETRY_COUNT=0
+            HEALTH_PORT=8001
+
+            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+              if curl -sf "http://localhost:${HEALTH_PORT}/" > /dev/null 2>&1; then
+                echo "✅ Health check passed after $((RETRY_COUNT + 1)) attempt(s)"
+                break
+              fi
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              echo "⏳ Health check attempt ${RETRY_COUNT}/${MAX_RETRIES} failed, retrying in 2s..."
+              sleep 2
+            done
+
+            if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+              echo "❌ Health check failed after ${MAX_RETRIES} attempts. Rolling back..."
+              pm2 resurrect || pm2 start "uv run uvicorn app.main:app --host 0.0.0.0 --port 8001" --name backend-production
+              echo "❌ Deployment FAILED - health check did not pass. Rolled back to previous state."
+              exit 1
+            fi
+
+            echo "=== Production Deployment Complete ==="
