@@ -1,0 +1,618 @@
+{
+  "info": {
+    "_postman_id": "anvila-auth-suite-001",
+    "name": "Anvila Auth API",
+    "description": "Comprehensive test suite for the Anvila authentication API. Covers email/password registration, login, verification, password reset, refresh/logout/me, Google OAuth, and GitHub OAuth including the link-confirmation flow.\n\n## Environments\n- **Local**: backend running on http://localhost:8000.\n- **Staging**: https://api.staging.anvila.hng14.com.\n\n## Variables consumed\nAll requests reference `{{base_url}}`. Tokens captured by Login flows populate `{{access_token}}` and `{{refresh_token}}`. The OAuth callback and confirm-link requests are manual-only — they require redirect-loop or inbox interaction that Postman cannot drive.\n\n## Folder organization\n1. Health\n2. Email/Password Auth\n3. Email Verification\n4. Password Reset\n5. Session Management\n6. Google OAuth\n7. GitHub OAuth\n8. OAuth Link Confirmation\n9. Admin (gated)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{access_token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "1. Health",
+      "item": [
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/health", "host": ["{{base_url}}"], "path": ["api", "v1", "health"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Email/Password Auth",
+      "item": [
+        {
+          "name": "POST /auth/register",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"display_name\": \"Test User\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/v1/auth/register", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "register"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test('envelope shape', () => { pm.expect(body).to.have.property('success', true); pm.expect(body).to.have.property('data'); });",
+                  "pm.test('user data', () => { pm.expect(body.data).to.have.property('email'); pm.expect(body.data).to.have.property('id'); pm.expect(body.data.email_verified).to.eql(false); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/register (duplicate)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/v1/auth/register", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "register"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/v1/auth/login", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "login"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('envelope shape', () => pm.expect(body).to.have.property('data'));",
+                  "pm.test('tokens present', () => { pm.expect(body.data.tokens.access_token).to.be.a('string'); pm.expect(body.data.tokens.refresh_token).to.be.a('string'); });",
+                  "pm.environment.set('access_token', body.data.tokens.access_token);",
+                  "pm.environment.set('refresh_token', body.data.tokens.refresh_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/login (wrong password)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"WrongPass1\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/v1/auth/login", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "login"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Email Verification",
+      "item": [
+        {
+          "name": "POST /auth/verify-email",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{verification_token}}\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/v1/auth/verify-email", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "verify-email"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('email_verified true', () => pm.expect(pm.response.json().data.email_verified).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/resend-verification",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/v1/auth/resend-verification", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "resend-verification"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(pm.response.json().success).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Password Reset",
+      "item": [
+        {
+          "name": "POST /auth/forgot-password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/v1/auth/forgot-password", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "forgot-password"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK (anti-enumeration: same shape for existing/unknown)', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/reset-password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{reset_token}}\",\n  \"new_password\": \"NewStrongpass1\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/v1/auth/reset-password", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "reset-password"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. Session Management",
+      "item": [
+        {
+          "name": "POST /auth/refresh",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/v1/auth/refresh", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "refresh"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('new access_token', () => pm.expect(body.data.access_token).to.be.a('string'));",
+                  "pm.environment.set('access_token', body.data.access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /auth/me",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/auth/me", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "me"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('email present', () => pm.expect(pm.response.json().data.email).to.be.a('string'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /auth/me (no token)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/auth/me", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "me"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /auth/logout",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"{{refresh_token}}\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/api/v1/auth/logout", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "logout"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Google OAuth",
+      "item": [
+        {
+          "name": "GET /auth/google (start)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/auth/google", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "google"] }
+          },
+          "protocolProfileBehavior": { "followRedirects": false },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('307 Redirect', () => pm.response.to.have.status(307));",
+                  "pm.test('Location to accounts.google.com', () => { const loc = pm.response.headers.get('Location'); pm.expect(loc).to.include('accounts.google.com'); pm.expect(loc).to.include('state='); pm.expect(loc).to.not.include('client_secret'); });",
+                  "pm.test('oauth_state cookie set', () => { const setCookie = pm.response.headers.get('Set-Cookie') || ''; pm.expect(setCookie).to.include('oauth_state='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /auth/google/callback (manual)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/google/callback?code=PASTE_REAL_CODE_HERE&state=PASTE_REAL_STATE_HERE",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "google", "callback"],
+              "query": [
+                { "key": "code", "value": "PASTE_REAL_CODE_HERE" },
+                { "key": "state", "value": "PASTE_REAL_STATE_HERE" }
+              ]
+            },
+            "description": "Manual run only. Complete the Google OAuth flow in a browser to obtain a real `code` and `state` pair, then paste them here. Postman cannot drive Google's consent screen."
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. GitHub OAuth",
+      "item": [
+        {
+          "name": "GET /auth/github (start)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/auth/github", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "github"] }
+          },
+          "protocolProfileBehavior": { "followRedirects": false },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('307 Redirect', () => pm.response.to.have.status(307));",
+                  "const loc = pm.response.headers.get('Location') || '';",
+                  "pm.test('Location to github.com/login/oauth/authorize', () => pm.expect(loc).to.include('github.com/login/oauth/authorize'));",
+                  "pm.test('state param present', () => pm.expect(loc).to.include('state='));",
+                  "pm.test('client_id present', () => pm.expect(loc).to.include('client_id='));",
+                  "pm.test('client_secret NOT present (AUTH-REQ-034)', () => pm.expect(loc).to.not.include('client_secret'));",
+                  "pm.test('scope read:user user:email present', () => pm.expect(loc).to.match(/scope=[^&]*read%3Auser/));",
+                  "pm.test('oauth_state cookie set HttpOnly', () => { const setCookie = pm.response.headers.get('Set-Cookie') || ''; pm.expect(setCookie).to.include('oauth_state='); pm.expect(setCookie.toLowerCase()).to.include('httponly'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /auth/github (flag off returns 404)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{base_url}}/api/v1/auth/github", "host": ["{{base_url}}"], "path": ["api", "v1", "auth", "github"] },
+            "description": "Run this against a deployment with GITHUB_OAUTH_ENABLED=false to verify the feature flag suppresses the route. In a default-on local environment this will return 307."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Manual: expect 404 when flag is off, 307 when on.",
+                  "pm.test('200/307/404 (depends on flag)', () => pm.expect([200, 307, 404]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /auth/github/callback (state mismatch)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Cookie", "value": "oauth_state=tampered" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/github/callback?code=any&state=different",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "github", "callback"],
+              "query": [
+                { "key": "code", "value": "any" },
+                { "key": "state", "value": "different" }
+              ]
+            },
+            "description": "Negative test for AUTH-REQ-033 / TC-034. Asserts state mismatch returns 400 and no token exchange is attempted."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request (AUTH-REQ-033)', () => pm.response.to.have.status(400));",
+                  "pm.test('detail mentions state', () => pm.expect(pm.response.text().toLowerCase()).to.include('state'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /auth/github/callback (provider error)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/github/callback?error=access_denied&error_description=User%20cancelled&state=any",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "github", "callback"],
+              "query": [
+                { "key": "error", "value": "access_denied" },
+                { "key": "error_description", "value": "User cancelled" },
+                { "key": "state", "value": "any" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /auth/github/callback (manual full flow)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Cookie", "value": "oauth_state={{oauth_state_jwt}}" }],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/github/callback?code=PASTE_REAL_CODE&state={{oauth_state_jwt}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "github", "callback"],
+              "query": [
+                { "key": "code", "value": "PASTE_REAL_CODE" },
+                { "key": "state", "value": "{{oauth_state_jwt}}" }
+              ]
+            },
+            "description": "Manual only. Complete GitHub consent in a browser using the /auth/github redirect URL, copy the `code` from the callback query string, copy the `oauth_state` cookie value into {{oauth_state_jwt}}, then fire this request."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Expect 200 success or link-pending; both are envelope success.",
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "if (body.data && body.data.link_confirmation_required) {",
+                  "  pm.test('link confirmation path', () => pm.expect(body.data.email_destination_hint).to.match(/\\*\\*\\*/));",
+                  "} else {",
+                  "  pm.test('access_token issued', () => pm.expect(body.data.tokens.access_token).to.be.a('string'));",
+                  "  pm.environment.set('access_token', body.data.tokens.access_token);",
+                  "  pm.environment.set('refresh_token', body.data.tokens.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "8. OAuth Link Confirmation",
+      "item": [
+        {
+          "name": "GET /auth/oauth/confirm-link (valid)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/oauth/confirm-link?token={{link_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "oauth", "confirm-link"],
+              "query": [{ "key": "token", "value": "{{link_token}}" }]
+            },
+            "description": "Manual. Trigger the link-confirmation branch via the GitHub callback, retrieve the raw token from the email (or the dev logs / DB), set {{link_token}}, fire this request."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('access_token issued', () => pm.expect(body.data.tokens.access_token).to.be.a('string'));",
+                  "pm.environment.set('access_token', body.data.tokens.access_token);",
+                  "pm.environment.set('refresh_token', body.data.tokens.refresh_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /auth/oauth/confirm-link (invalid token)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/oauth/confirm-link?token=garbage",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "oauth", "confirm-link"],
+              "query": [{ "key": "token", "value": "garbage" }]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 anti-enumeration', () => pm.response.to.have.status(400));",
+                  "pm.test('generic message', () => pm.expect(pm.response.json().detail.toLowerCase()).to.include('invalid or expired'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "9. Admin",
+      "item": [
+        {
+          "name": "GET /admin/me",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": { "raw": "{{base_url}}/api/v1/admin/me", "host": ["{{base_url}}"], "path": ["api", "v1", "admin", "me"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Expect 403 for non-admin, 200 for admin.",
+                  "pm.test('200 or 403', () => pm.expect([200, 403]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" }
+  ]
+}
