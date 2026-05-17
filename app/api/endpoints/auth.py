@@ -399,6 +399,11 @@ async def github_callback(
         await db.rollback()
         clear_oauth_state_cookie(response)
         raise
+    except Exception:
+        await db.rollback()
+        clear_oauth_state_cookie(response)
+        _logger.exception("event=auth.oauth.github.callback.error outcome=unhandled")
+        raise
 
 
 @_github_router.get(
@@ -446,7 +451,6 @@ async def confirm_link(
             ip_address=request.client.host if request.client else None,
         )
         db.add(refresh_record)
-        await db.flush()
         await db.commit()
         await db.refresh(user)
 
@@ -475,6 +479,10 @@ async def confirm_link(
             "event=auth.oauth.github.link_failed outcome=error error_class=%s",
             exc.__class__.__name__,
         )
+        raise
+    except Exception:
+        await db.rollback()
+        _logger.exception("event=auth.oauth.github.link_failed outcome=unhandled")
         raise
 
 
