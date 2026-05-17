@@ -103,3 +103,8 @@ class MeResponse(BaseModel):
 class RefreshData(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class LinkConfirmationData(BaseModel):
+    link_confirmation_required: bool = True
+    email_destination_hint: str

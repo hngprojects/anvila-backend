@@ -1,3 +1,8 @@
+import hashlib
+import logging
+import secrets
+from datetime import UTC, datetime, timedelta
+
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -13,9 +18,11 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DBSession
 from app.core.config import settings
-from app.core.security import create_oauth_state_token, decode_token
+from app.core.security import create_access_token, create_oauth_state_token, decode_token
+from app.models.refresh_token import RefreshToken
 from app.schemas.auth import (
     ForgotPasswordRequest,
+    LinkConfirmationData,
     LoginData,
     LoginRequest,
     LogoutRequest,
@@ -34,18 +41,34 @@ from app.services import auth as auth_service
 from app.services.auth import (
     OAUTH_STATE_COOKIE,
     clear_oauth_state_cookie,
+    get_user_by_id,
+    revoke_all_active_refresh_tokens,
     set_oauth_state_cookie,
     set_refresh_token_cookie,
 )
-from app.services.email import send_password_reset_email, send_verification_email
+from app.services.email import (
+    send_oauth_link_email,
+    send_password_reset_email,
+    send_verification_email,
+)
+from app.services.github_oauth import (
+    GITHUB_LINK_CONFIRMATION_PATH,
+    LoginCompleted,
+    apply_github_link,
+    build_github_auth_url,
+    process_github_callback,
+)
 from app.services.google_oauth import (
     build_google_auth_url,
     exchange_google_code,
     fetch_google_userinfo,
     login_or_register_google_user,
 )
+from app.services.oauth_link import consume_link_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+_logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -271,3 +294,197 @@ async def google_callback(
         )
         clear_oauth_state_cookie(error_response)
         return error_response  # pyright: ignore[reportReturnType]
+
+
+# GitHub OAuth
+# ==============
+def _mask_email(email: str) -> str:
+    local, _, domain = email.partition("@")
+    if not local or not domain:
+        return "***"
+    domain_name, _, tld = domain.rpartition(".")
+    if not domain_name:
+        # No dot in domain; mask everything after first char.
+        return f"{local[0]}***@{domain[0]}***"
+    masked_local = f"{local[0]}{'*' * 3}"
+    masked_domain = f"{domain_name[0]}{'*' * 3}"
+    return f"{masked_local}@{masked_domain}.{tld}"
+
+
+_github_router = APIRouter(tags=["auth"])
+
+
+@_github_router.get("/github", summary="Start GitHub OAuth flow")
+async def github_start(response: Response) -> Response:
+    state = create_oauth_state_token()
+    set_oauth_state_cookie(response, state)
+    response.status_code = status.HTTP_307_TEMPORARY_REDIRECT
+    response.headers["Location"] = build_github_auth_url(state)
+    return response
+
+
+@_github_router.get(
+    "/github/callback",
+    summary="Handle GitHub OAuth callback",
+)
+async def github_callback(
+    request: Request,
+    response: Response,
+    db: DBSession,
+    bg_task: BackgroundTasks,
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+    error_description: str | None = Query(default=None),
+    state_cookie: str | None = Cookie(default=None, alias=OAUTH_STATE_COOKIE),
+) -> ApiResponse[LoginData] | ApiResponse[LinkConfirmationData]:
+    try:
+        if error:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_description or "GitHub OAuth failed",
+            )
+        if not code or not state or not state_cookie:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing OAuth parameters",
+            )
+        # Cookie-equality before JWT decode keeps the CSRF check independent of signing.
+        if state != state_cookie:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid OAuth state",
+            )
+        decode_token(state, expected_purpose="oauth_state")
+
+        outcome = await process_github_callback(db, code=code, request=request)
+
+        if isinstance(outcome, LoginCompleted):
+            await db.commit()
+            await db.refresh(outcome.user)
+            set_refresh_token_cookie(response, outcome.raw_refresh)
+            clear_oauth_state_cookie(response)
+            return ApiResponse[LoginData](
+                message="Login successful.",
+                data=LoginData(
+                    user=UserResponse.model_validate(outcome.user),
+                    tokens=TokenResponse(
+                        access_token=outcome.access_token,
+                        refresh_token=outcome.raw_refresh,
+                    ),
+                ),
+            )
+
+        # LinkConfirmationRequired branch — persist the link-token row, send email,
+        # but never log the user in or set a refresh cookie.
+        await db.commit()
+        clear_oauth_state_cookie(response)
+        link_url = (
+            f"{settings.FRONTEND_URL}{GITHUB_LINK_CONFIRMATION_PATH}"
+            f"?token={outcome.link_token}"
+        )
+        bg_task.add_task(send_oauth_link_email, outcome.email, link_url)
+        return ApiResponse[LinkConfirmationData](
+            message=(
+                "We've sent a confirmation link to your email. "
+                "Click the link to finish connecting your GitHub account."
+            ),
+            data=LinkConfirmationData(
+                link_confirmation_required=True,
+                email_destination_hint=_mask_email(outcome.email),
+            ),
+        )
+
+    except HTTPException:
+        await db.rollback()
+        clear_oauth_state_cookie(response)
+        raise
+    except Exception:
+        await db.rollback()
+        clear_oauth_state_cookie(response)
+        _logger.exception("event=auth.oauth.github.callback.error outcome=unhandled")
+        raise
+
+
+@_github_router.get(
+    "/oauth/confirm-link",
+    response_model=ApiResponse[LoginData],
+    summary="Confirm OAuth identity link",
+)
+async def confirm_link(
+    request: Request,
+    response: Response,
+    db: DBSession,
+    token: str = Query(...),
+) -> ApiResponse[LoginData]:
+    try:
+        row = await consume_link_token(db, token)
+
+        user = await get_user_by_id(db, row.user_id)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired link token",
+            )
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is disabled",
+            )
+
+        apply_github_link(
+            user,
+            github_subject=row.provider_subject,
+            github_username=None,
+        )
+
+        await revoke_all_active_refresh_tokens(db, user.id)
+
+        access_token = create_access_token(str(user.id))
+        raw_refresh = secrets.token_urlsafe(32)
+        refresh_record = RefreshToken(
+            token_hash=hashlib.sha256(raw_refresh.encode()).hexdigest(),
+            user_id=user.id,
+            expires_at=datetime.now(UTC)
+            + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+            user_agent=request.headers.get("user-agent"),
+            ip_address=request.client.host if request.client else None,
+        )
+        db.add(refresh_record)
+        await db.commit()
+        await db.refresh(user)
+
+        set_refresh_token_cookie(response, raw_refresh)
+
+        _logger.info(
+            "event=auth.oauth.github.link_confirmed outcome=success "
+            "user_id=%s email_hash=%s",
+            user.id,
+            hashlib.sha256(user.email.lower().encode()).hexdigest()[:16],
+        )
+
+        return ApiResponse[LoginData](
+            message="GitHub account linked. Login successful.",
+            data=LoginData(
+                user=UserResponse.model_validate(user),
+                tokens=TokenResponse(
+                    access_token=access_token,
+                    refresh_token=raw_refresh,
+                ),
+            ),
+        )
+    except HTTPException as exc:
+        await db.rollback()
+        _logger.warning(
+            "event=auth.oauth.github.link_failed outcome=error error_class=%s",
+            exc.__class__.__name__,
+        )
+        raise
+    except Exception:
+        await db.rollback()
+        _logger.exception("event=auth.oauth.github.link_failed outcome=unhandled")
+        raise
+
+
+if settings.GITHUB_OAUTH_ENABLED:
+    router.include_router(_github_router)
