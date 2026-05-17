@@ -15,5 +15,4 @@ class ApiResponse[T](BaseModel):
     success: bool = True
     message: str | None = None
     data: T | None = None
-    errors: list[ErrorDetail] | None = None
     meta: dict[str, Any] | None = None
