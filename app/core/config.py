@@ -47,6 +47,20 @@ class Settings(BaseSettings):
     GOOGLE_USERINFO_URL: str = "https://openidconnect.googleapis.com/v1/userinfo"
     GOOGLE_SCOPES: str = "openid email profile"
 
+    # ------------------------------------------------------------------
+    # GitHub OAuth
+    # ------------------------------------------------------------------
+    GITHUB_CLIENT_ID: str
+    GITHUB_CLIENT_SECRET: str
+    GITHUB_REDIRECT_URI: str
+    GITHUB_AUTH_URL: str = "https://github.com/login/oauth/authorize"
+    GITHUB_TOKEN_URL: str = "https://github.com/login/oauth/access_token"
+    GITHUB_USERINFO_URL: str = "https://api.github.com/user"
+    GITHUB_EMAILS_URL: str = "https://api.github.com/user/emails"
+    GITHUB_SCOPES: str = "read:user user:email"
+    GITHUB_OAUTH_ENABLED: bool = False
+    OAUTH_LINK_TOKEN_EXPIRE_MINUTES: int = 30
+
 
 @lru_cache
 def get_settings() -> Settings:

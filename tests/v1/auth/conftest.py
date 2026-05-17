@@ -6,6 +6,19 @@ os.environ.setdefault(
     "postgresql+asyncpg://anvila_test:anvila_test_pass@localhost:5432/anvila_backend_test",
 )
 os.environ.setdefault("JWT_SECRET", "ci-test-secret-key-minimum-32-characters-long")
+os.environ.setdefault("GOOGLE_CLIENT_ID", "test-google-client-id")
+os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-google-client-secret")
+os.environ.setdefault(
+    "GOOGLE_REDIRECT_URI",
+    "http://localhost:8000/api/v1/auth/google/callback",
+)
+os.environ.setdefault("GITHUB_CLIENT_ID", "test-github-client-id")
+os.environ.setdefault("GITHUB_CLIENT_SECRET", "test-github-client-secret")
+os.environ.setdefault(
+    "GITHUB_REDIRECT_URI",
+    "http://localhost:8000/api/v1/auth/github/callback",
+)
+os.environ.setdefault("GITHUB_OAUTH_ENABLED", "true")
 
 from collections.abc import AsyncGenerator  # noqa: E402
 
