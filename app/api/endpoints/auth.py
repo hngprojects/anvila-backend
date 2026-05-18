@@ -3,6 +3,10 @@ import logging
 import secrets
 from datetime import UTC, datetime, timedelta
 
+from app.services.email import (
+    send_oauth_link_email,
+    send_password_reset_email,
+)
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -47,10 +51,6 @@ from app.services.auth import (
     revoke_all_active_refresh_tokens,
     set_oauth_state_cookie,
     set_refresh_token_cookie,
-)
-from app.services.email import (
-    send_oauth_link_email,
-    send_password_reset_email,
 )
 from app.services.github_oauth import (
     GITHUB_LINK_CONFIRMATION_PATH,
