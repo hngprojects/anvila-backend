@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     PROJECT_NAME: str = "anvila-backend"
     API_V1_PREFIX: str = "/api/v1"
-    ADMIN_EMAIL: str | None = None
+    ADMIN_EMAIL: str = "admin@anvila.com"
     ADMIN_PASSWORD: str | None = None
     DATABASE_URL: PostgresDsn
     LOG_LEVEL: str = "INFO"
@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: Annotated[int, Field(gt=0)] = 7
     VERIFICATION_TOKEN_EXPIRE_HOURS: Annotated[int, Field(gt=0)] = 24
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: Annotated[int, Field(gt=0)] = 60
+
+    # ------------------------------------------------------------------
+    # EMAIL
+    # ------------------------------------------------------------------
+    BREVO_API_KEY: str = ""
+    SMTP_FROM_NAME: str = "Anvila "
+    SMTP_FROM_EMAIL: str = "hello@anvila.com"
 
     # ------------------------------------------------------------------
     # Google OAuth
