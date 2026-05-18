@@ -72,7 +72,7 @@ def send_oauth_link_email(email: str, link_url: str) -> None:
 
 
 def send_contact_admin_notification(
-    full_name: str, email: str, phone: str | None, message: str
+    full_name: str, email: str, message: str, phone: str | None = None
 ) -> None:
     plain, html = _render(
         "contact_admin.html", full_name=full_name, email=email, phone=phone, message=message
