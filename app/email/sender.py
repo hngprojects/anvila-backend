@@ -66,6 +66,11 @@ def send_password_reset_email(email: str, reset_url: str) -> None:
     send_email(email, "Reset your password", html, plain)
 
 
+def send_oauth_link_email(email: str, link_url: str) -> None:
+    plain, html = _render("oauth_link.html", email=email, link_url=link_url)
+    send_email(email, "Connect your GitHub account", html, plain)
+
+
 def send_contact_admin_notification(
     full_name: str, email: str, phone: str | None, message: str
 ) -> None:
