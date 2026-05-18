@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.paginator import PageParams
 from app.core.security import decode_token
 from app.db.session import get_session
 from app.models.enums import UserPlan
@@ -96,11 +97,6 @@ def require_pro(user: CurrentUser) -> User:
     return user
 
 
-CanGenerate = Annotated[User, Depends(require_can_generate)]
-CanRefine = Annotated[User, Depends(require_can_refine)]
-ProUser = Annotated[User, Depends(require_pro)]
-
-
 def require_admin(user: CurrentUser) -> User:
     if not user.is_admin:
         raise HTTPException(
@@ -110,4 +106,8 @@ def require_admin(user: CurrentUser) -> User:
     return user
 
 
+CanGenerate = Annotated[User, Depends(require_can_generate)]
+CanRefine = Annotated[User, Depends(require_can_refine)]
+ProUser = Annotated[User, Depends(require_pro)]
 AdminRequired = Annotated[User, Depends(require_admin)]
+PaginationParams = Annotated[PageParams, Depends(PageParams)]
