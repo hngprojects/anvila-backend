@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_token
 from app.db.session import get_session
+from app.models.enums import UserPlan
 from app.models.user import User
 from app.services.auth import get_user_by_id
 
@@ -57,3 +58,44 @@ async def get_current_admin(current_user: CurrentUser) -> User:
 
 
 AdminUser = Annotated[User, Depends(get_current_admin)]
+
+
+def require_can_generate(user: CurrentUser) -> User:
+    if user.plan == UserPlan.FREE and user.generation_count >= 3:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "REFINE_LIMIT_REACHED",
+                "message": "One free refinement used. Upgrade to continue.",
+            },
+        )
+    return user
+
+
+def require_can_refine(user: CurrentUser) -> User:
+    if user.plan == UserPlan.FREE and user.refine_used:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "REFINE_LIMIT_REACHED",
+                "message": "One free refinement used. Upgrade to continue.",
+            },
+        )
+    return user
+
+
+def require_pro(user: CurrentUser) -> User:
+    if user.plan == UserPlan.PAID:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "PRO_REQUIRED",
+                "message": "This feature requires a paid plan.",
+            },
+        )
+    return user
+
+
+CanGenerate = Annotated["User", Depends(require_can_generate)]
+CanRefine = Annotated["User", Depends(require_can_refine)]
+ProUser = Annotated["User", Depends(require_pro)]

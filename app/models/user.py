@@ -1,13 +1,14 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
 from app.models.enums import UserPlan, UserProvider
 
 if TYPE_CHECKING:
+    from app.models.chat_session import ChatSession
     from app.models.oauth_link_token import OAuthLinkToken
     from app.models.persona import Persona
     from app.models.refresh_token import RefreshToken
@@ -80,6 +81,29 @@ class User(BaseModel):
         nullable=False,
         default=False,
         server_default="false",
+    )
+
+    github_access_token_encrypted: Mapped[str | None] = mapped_column(Text)
+    github_connected: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
+    # Generation tracking
+    generation_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    total_tokens_used: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
+    # Refinement trial
+    refine_used: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
+    # Relationships to add
+    chat_sessions: Mapped[list["ChatSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
     )
 
     # relationships
