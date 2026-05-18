@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% macro plain_text(full_name, email, phone, message) %}
+New Contact Form Submission
+
+Name: {{ full_name }}
+Email: {{ email }}
+Phone: {{ phone or "—" }}
+
+Message:
+{{ message }}
+{% endmacro %}
+
+{% block title %}New contact message{% endblock %}
+{% block heading %}New Contact Submission{% endblock %}
+
+{% block body %}
+  <p style="margin:0 0 4px;color:#374151;font-size:15px;"><strong>Name:</strong> {{ full_name }}</p>
+  <p style="margin:0 0 4px;color:#374151;font-size:15px;"><strong>Email:</strong> {{ email }}</p>
+  <p style="margin:0 0 20px;color:#374151;font-size:15px;"><strong>Phone:</strong> {{ phone or "—" }}</p>
+  <div style="border-top:1px solid #e5e7eb;padding-top:16px;">
+    <p style="margin:0 0 8px;color:#374151;font-size:15px;"><strong>Message:</strong></p>
+    <p style="margin:0;color:#374151;font-size:15px;line-height:1.7;">{{ message }}</p>
+  </div>
+{% endblock %}
+
+{% block footer %}
+  <p style="margin:0;color:#9ca3af;font-size:12px;">Admin notification — Agent Forge</p>
+{% endblock %}

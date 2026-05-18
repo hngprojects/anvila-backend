@@ -8,6 +8,7 @@ from app.models.base import BaseModel
 from app.models.enums import UserPlan, UserProvider
 
 if TYPE_CHECKING:
+    from app.models.oauth_link_token import OAuthLinkToken
     from app.models.persona import Persona
     from app.models.refresh_token import RefreshToken
 
@@ -52,6 +53,11 @@ class User(BaseModel):
         unique=True,
         index=True,
     )
+    github_subject: Mapped[str | None] = mapped_column(
+        String(255),
+        unique=True,
+        index=True,
+    )
 
     verification_token_hash: Mapped[str | None] = mapped_column(
         String(64),
@@ -82,6 +88,10 @@ class User(BaseModel):
         cascade="all, delete-orphan",
     )
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    oauth_link_tokens: Mapped[list["OAuthLinkToken"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
     )

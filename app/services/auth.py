@@ -44,6 +44,21 @@ async def get_user_by_google_subject(db: AsyncSession, subject: str) -> User | N
     return result.scalar_one_or_none()
 
 
+async def get_user_by_github_subject(db: AsyncSession, subject: str) -> User | None:
+    result = await db.execute(select(User).where(User.github_subject == subject))
+    return result.scalar_one_or_none()
+
+
+async def revoke_all_active_refresh_tokens(db: AsyncSession, user_id: uuid.UUID) -> int:
+    result = await db.execute(
+        update(RefreshToken)
+        .where(RefreshToken.user_id == user_id)
+        .where(RefreshToken.revoked == False)  # noqa: E712
+        .values(revoked=True)
+    )
+    return result.rowcount or 0
+
+
 async def register_user(
     db: AsyncSession,
     email: str,
