@@ -34,7 +34,7 @@ _BLOCKLIST = re.compile(
 MAX_LENGTH = 4000
 
 
-class PromptSanitizer:
+class PromptSanitiser:
     def sanitize(self, raw: str) -> str:
         # Step 1: Run blocklist regex.
         #   Replace each matched segment with "[REMOVED]".
