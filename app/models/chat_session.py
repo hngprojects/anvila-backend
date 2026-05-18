@@ -36,8 +36,6 @@ class ChatSession(BaseModel):
     clarification_round: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
-    # Compressed intent summary — updated after each clarification round.
-    # Only this field is re-sent to the LLM, not the full message history.
     compressed_context: Mapped[str | None] = mapped_column(Text)
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

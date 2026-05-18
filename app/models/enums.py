@@ -36,3 +36,14 @@ class SkillSourceRegistry(enum.StrEnum):
     SKILLS_SH = "skills.sh"
     OPENCLAW = "openclaw"
     ANVILA = "anvila"
+
+
+class SessionStatus(enum.StrEnum):
+    ACTIVE = "active"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class MessageRole(enum.StrEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
