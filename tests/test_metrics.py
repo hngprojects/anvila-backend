@@ -32,3 +32,15 @@ def test_metrics_endpoint_exports_http_request_metrics():
     assert "http_request_duration_seconds_bucket" in body
     assert "http_requests_in_progress" in body
     assert 'path="/"' in body
+
+
+def test_metrics_group_unmatched_routes_to_control_label_cardinality():
+    client = TestClient(app)
+
+    response = client.get("/definitely-not-a-real-route")
+    assert response.status_code == 404
+
+    body = client.get("/metrics").text
+
+    assert 'path="__unmatched__"' in body
+    assert 'path="/definitely-not-a-real-route"' not in body

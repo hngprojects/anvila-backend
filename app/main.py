@@ -42,7 +42,7 @@ HTTP_REQUESTS_IN_PROGRESS = Gauge(
 
 def _route_path(request: Request) -> str:
     route = request.scope.get("route")
-    return getattr(route, "path", request.url.path)
+    return getattr(route, "path", "__unmatched__")
 
 
 @app.middleware("http")
@@ -51,7 +51,7 @@ async def prometheus_metrics_middleware(request: Request, call_next):
         return await call_next(request)
 
     method = request.method
-    in_progress_path = request.url.path
+    in_progress_path = "__pending__"
     path = in_progress_path
     start = time.perf_counter()
     status = "500"
