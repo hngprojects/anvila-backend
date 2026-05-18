@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     COOKIE_SECURE: bool = True
 
     # redis
-    REDIS_URL: str
+    REDIS_URL: str = ""
 
     # ------------------------------------------------------------------
     # JWT / tokens
