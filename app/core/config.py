@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     TRUSTED_PROXIES: str = ""
     COOKIE_SECURE: bool = True
 
+    # redis
+    REDIS_URL: str
+
     # ------------------------------------------------------------------
     # JWT / tokens
     # ------------------------------------------------------------------
