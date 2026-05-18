@@ -124,8 +124,7 @@ async def validation_exception(request: Request, exc: RequestValidationError):
     """Validation exception handler"""
 
     errors = [
-        {"loc": error["loc"], "msg": error["msg"], "type": error["type"]}
-        for error in exc.errors()
+        {"loc": error["loc"], "msg": error["msg"], "type": error["type"]} for error in exc.errors()
     ]
 
     return JSONResponse(

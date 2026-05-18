@@ -99,3 +99,15 @@ def require_pro(user: CurrentUser) -> User:
 CanGenerate = Annotated[User, Depends(require_can_generate)]
 CanRefine = Annotated[User, Depends(require_can_refine)]
 ProUser = Annotated[User, Depends(require_pro)]
+
+
+def require_admin(user: CurrentUser) -> User:
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "FORBIDDEN", "message": "Admin access required."},
+        )
+    return user
+
+
+AdminRequired = Annotated[User, Depends(require_admin)]
