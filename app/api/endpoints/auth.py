@@ -13,12 +13,17 @@ from fastapi import (
     Response,
     status,
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DBSession
 from app.core.config import settings
 from app.core.security import create_access_token, create_oauth_state_token, decode_token
+from app.email.sender import (
+    send_oauth_link_email,
+    send_password_reset_email,
+    send_verification_email,
+)
 from app.models.refresh_token import RefreshToken
 from app.schemas.auth import (
     ForgotPasswordRequest,
@@ -27,6 +32,7 @@ from app.schemas.auth import (
     LoginRequest,
     LogoutRequest,
     MeResponse,
+    OTTExchangeRequest,
     RefreshData,
     RefreshRequest,
     RegisterRequest,
@@ -46,11 +52,6 @@ from app.services.auth import (
     set_oauth_state_cookie,
     set_refresh_token_cookie,
 )
-from app.services.email import (
-    send_oauth_link_email,
-    send_password_reset_email,
-    send_verification_email,
-)
 from app.services.github_oauth import (
     GITHUB_LINK_CONFIRMATION_PATH,
     LoginCompleted,
@@ -65,6 +66,7 @@ from app.services.google_oauth import (
     login_or_register_google_user,
 )
 from app.services.oauth_link import consume_link_token
+from app.services.ott_store import consume_ott, redirect_with_ott
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -243,7 +245,7 @@ async def google_callback(
     error: str | None = Query(default=None),
     error_description: str | None = Query(default=None),
     state_cookie: str | None = Cookie(default=None, alias=OAUTH_STATE_COOKIE),
-) -> TokenResponse:
+) -> RedirectResponse:
     """Validate state, exchange code for tokens, issue app tokens, clear cookies."""
     try:
         if error:
@@ -276,7 +278,7 @@ async def google_callback(
             )
 
         profile = await fetch_google_userinfo(google_access_token)
-        access_token, raw_refresh, _ = await login_or_register_google_user(
+        access_token, raw_refresh, user = await login_or_register_google_user(
             db=db,
             profile=profile,
             request=request,
@@ -285,7 +287,7 @@ async def google_callback(
         set_refresh_token_cookie(response, raw_refresh)
         clear_oauth_state_cookie(response)
 
-        return TokenResponse(access_token=access_token, refresh_token=raw_refresh)
+        return await redirect_with_ott(access_token, raw_refresh, UserResponse.model_validate(user))
 
     except HTTPException as exc:
         error_response = JSONResponse(
@@ -380,8 +382,7 @@ async def github_callback(
         await db.commit()
         clear_oauth_state_cookie(response)
         link_url = (
-            f"{settings.FRONTEND_URL}{GITHUB_LINK_CONFIRMATION_PATH}"
-            f"?token={outcome.link_token}"
+            f"{settings.FRONTEND_URL}{GITHUB_LINK_CONFIRMATION_PATH}?token={outcome.link_token}"
         )
         bg_task.add_task(send_oauth_link_email, outcome.email, link_url)
         return ApiResponse[LinkConfirmationData](
@@ -445,8 +446,7 @@ async def confirm_link(
         refresh_record = RefreshToken(
             token_hash=hashlib.sha256(raw_refresh.encode()).hexdigest(),
             user_id=user.id,
-            expires_at=datetime.now(UTC)
-            + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+            expires_at=datetime.now(UTC) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
             user_agent=request.headers.get("user-agent"),
             ip_address=request.client.host if request.client else None,
         )
@@ -457,8 +457,7 @@ async def confirm_link(
         set_refresh_token_cookie(response, raw_refresh)
 
         _logger.info(
-            "event=auth.oauth.github.link_confirmed outcome=success "
-            "user_id=%s email_hash=%s",
+            "event=auth.oauth.github.link_confirmed outcome=success user_id=%s email_hash=%s",
             user.id,
             hashlib.sha256(user.email.lower().encode()).hexdigest()[:16],
         )
@@ -484,6 +483,36 @@ async def confirm_link(
         await db.rollback()
         _logger.exception("event=auth.oauth.github.link_failed outcome=unhandled")
         raise
+
+
+@router.post("/token/exchange", response_model=ApiResponse[LoginData])
+async def exchange_ott(
+    body: OTTExchangeRequest,
+    response: Response,
+):
+    """Exchange a one-time token for real access/refresh tokens."""
+    result = await consume_ott(body.ott)
+
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired one-time token.",
+        )
+
+    access_token = result.access_token
+    raw_refresh = result.raw_refresh
+    user = result.user
+    set_refresh_token_cookie(response, raw_refresh)
+    return ApiResponse[LoginData](
+        message="Login successful.",
+        data=LoginData(
+            user=UserResponse.model_validate(user),
+            tokens=TokenResponse(
+                access_token=access_token,
+                refresh_token=raw_refresh,
+            ),
+        ),
+    )
 
 
 if settings.GITHUB_OAUTH_ENABLED:
