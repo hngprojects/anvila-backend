@@ -65,8 +65,8 @@ def require_can_generate(user: CurrentUser) -> User:
         raise HTTPException(
             status_code=403,
             detail={
-                "code": "REFINE_LIMIT_REACHED",
-                "message": "One free refinement used. Upgrade to continue.",
+                "code": "GENERATION_LIMIT_REACHED",
+                "message": "Free plan persona generation limit reached. Upgrade to continue.",
             },
         )
     return user
@@ -85,7 +85,7 @@ def require_can_refine(user: CurrentUser) -> User:
 
 
 def require_pro(user: CurrentUser) -> User:
-    if user.plan == UserPlan.PAID:
+    if user.plan != UserPlan.PAID:
         raise HTTPException(
             status_code=403,
             detail={
