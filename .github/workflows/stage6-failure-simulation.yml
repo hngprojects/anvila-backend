@@ -1,0 +1,14 @@
+name: Stage 6 Deployment Failure Simulation
+
+on:
+  pull_request:
+    branches: [staging]
+
+jobs:
+  fail-for-game-day:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Intentional Stage 6 failure
+        run: |
+          echo "Intentional deployment failure simulation for Stage 6 Game Day"
+          exit 1
