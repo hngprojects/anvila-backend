@@ -9,6 +9,7 @@ from app.models.skill import Skill
 from app.models.chat_session import ChatSession
 from app.models.conversation_message import ConversationMessage
 from app.models.contact import ContactMessage
+from app.models.waitlist import WaitlistEntry
 
 __all__ = [
     "Base",
@@ -23,4 +24,5 @@ __all__ = [
     "ChatSession",
     "ConversationMessage",
     "ContactMessage",
+    "WaitlistEntry",
 ]
