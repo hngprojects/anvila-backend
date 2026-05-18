@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.deps import CurrentUser, DBSession
 from app.core.config import settings
 from app.core.security import create_access_token, create_oauth_state_token, decode_token
+from app.email.sender import send_verification_email
 from app.models.refresh_token import RefreshToken
 from app.schemas.auth import (
     ForgotPasswordRequest,
@@ -50,7 +51,6 @@ from app.services.auth import (
 from app.services.email import (
     send_oauth_link_email,
     send_password_reset_email,
-    send_verification_email,
 )
 from app.services.github_oauth import (
     GITHUB_LINK_CONFIRMATION_PATH,
