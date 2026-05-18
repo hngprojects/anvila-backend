@@ -108,3 +108,7 @@ class RefreshData(BaseModel):
 class LinkConfirmationData(BaseModel):
     link_confirmation_required: bool = True
     email_destination_hint: str
+
+
+class OTTExchangeRequest(BaseModel):
+    ott: str
