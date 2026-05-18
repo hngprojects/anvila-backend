@@ -10,7 +10,9 @@ router = APIRouter(prefix="/users", tags=["users"])
 async def get_me(current_user: CurrentUser) -> dict:
     return {
         "id": str(current_user.id),
-        "plan": current_user.plan.value if hasattr(current_user.plan, "value") else current_user.plan,
+        "plan": current_user.plan.value
+        if hasattr(current_user.plan, "value")
+        else current_user.plan,
         "generation_count": current_user.generation_count,
         "generation_limit": 3 if current_user.plan == UserPlan.FREE else None,
         "refine_used": current_user.refine_used,

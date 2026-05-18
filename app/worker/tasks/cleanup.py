@@ -7,7 +7,7 @@ PURGE_AFTER_DAYS = 30
 def purge_soft_deleted() -> dict:
     import asyncio
     import logging
-    from datetime import datetime, timedelta, timezone
+    from datetime import UTC, datetime, timedelta
 
     from sqlalchemy import delete, select
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -20,7 +20,7 @@ def purge_soft_deleted() -> dict:
         from app.models.conversation_message import ConversationMessage
         from app.models.persona import Persona
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=PURGE_AFTER_DAYS)
+        cutoff = datetime.now(UTC) - timedelta(days=PURGE_AFTER_DAYS)
         engine = create_async_engine(str(settings.DATABASE_URL))
         factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 

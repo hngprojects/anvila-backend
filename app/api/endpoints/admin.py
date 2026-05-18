@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
@@ -54,7 +54,7 @@ async def upgrade_user(body: UpgradeUserRequest, current_user: AdminUser, db: DB
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     user.plan = UserPlan.PAID
-    user.upgraded_at = datetime.now(timezone.utc)
+    user.upgraded_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(user)
 
