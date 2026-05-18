@@ -110,7 +110,7 @@ def generate_persona(
     # to avoid circular imports with the Celery worker):
     #
     #   from app.db.session import AsyncSessionLocal
-    #   from app.service.llm.factory import get_llm_adapter
+    #   from app.services.llm.factory import get_llm_adapter
     #   from app.models.persona import Persona
     #   from app.models.persona_skill import PersonaSkill
     #   from app.models.chat_session import ChatSession
@@ -126,5 +126,7 @@ def generate_persona(
     # Use asyncio.run() to call async functions from inside the task.
     # Or use a sync DB session (not AsyncSession) if you prefer.
     # Decide on this approach before implementing and document it.
-
-    print(f"[generate_persona] received persona_id={persona_id} session_id={session_id}")
+    raise NotImplementedError(
+        f"generate_persona is not implemented yet for persona_id={persona_id} "
+        f"session_id={session_id}"
+    )

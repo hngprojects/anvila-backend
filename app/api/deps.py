@@ -96,6 +96,6 @@ def require_pro(user: CurrentUser) -> User:
     return user
 
 
-CanGenerate = Annotated["User", Depends(require_can_generate)]
-CanRefine = Annotated["User", Depends(require_can_refine)]
-ProUser = Annotated["User", Depends(require_pro)]
+CanGenerate = Annotated[User, Depends(require_can_generate)]
+CanRefine = Annotated[User, Depends(require_can_refine)]
+ProUser = Annotated[User, Depends(require_pro)]

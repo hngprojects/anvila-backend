@@ -27,7 +27,7 @@ go inside the function body, not at the top of the file.
 
 ---
 
-### `app/llm/types.py` — LLMResponse
+### `app/services/llm/types.py` — LLMResponse
 
 **Owner:** Dev A  
 **Status:** Already complete — no implementation needed. It is a dataclass.  
@@ -35,7 +35,7 @@ go inside the function body, not at the top of the file.
 
 ---
 
-### `app/llm/base.py` — LLMAdapter
+### `app/services/llm/base.py` — LLMAdapter
 
 **Owner:** Dev A  
 **Status:** Already complete — abstract class only. No implementation needed.  
@@ -43,7 +43,7 @@ go inside the function body, not at the top of the file.
 
 ---
 
-### `app/llm/gemini.py` — GeminiAdapter
+### `app/services/llm/gemini.py` — GeminiAdapter
 
 **Owner:** Dev A
 
@@ -60,7 +60,7 @@ uv add google-generativeai
 - Store model name on `self._model_name = "gemini-2.0-flash"` for the response
 
 `generate`:
-- Call `await self.model.generate_content_async([system_prompt, prompt])`
+- Call `await self.model.generate_content_async([prompt])`
 - Extract text: `response.text`
 - Extract tokens from `response.usage_metadata`:
   - `input_tokens = response.usage_metadata.prompt_token_count`
@@ -71,14 +71,14 @@ uv add google-generativeai
 `is_healthy`:
 ```python
 try:
-    await self.generate("ping", "respond with ok")
+    await self.generate("ping")
     return True
 except Exception:
     return False
 ```
 
 **Done when:**
-- `adapter.generate("hello", "say hi")` returns an `LLMResponse` with non-zero tokens
+- `adapter.generate("hello")` returns an `LLMResponse` with non-zero tokens
 - `adapter.is_healthy()` returns `True` with a valid key, `False` with an invalid key
 
 ---

@@ -6,6 +6,8 @@ from app.models.oauth_link_token import OAuthLinkToken
 from app.models.persona import Persona
 from app.models.persona_skill import PersonaSkill
 from app.models.skill import Skill
+from app.models.chat_session import ChatSession
+from app.models.conversation_message import ConversationMessage
 from app.models.contact import ContactMessage
 
 __all__ = [
@@ -18,5 +20,7 @@ __all__ = [
     "RefreshToken",
     "PasswordResetToken",
     "OAuthLinkToken",
+    "ChatSession",
+    "ConversationMessage",
     "ContactMessage",
 ]
