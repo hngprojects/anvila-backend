@@ -7,6 +7,7 @@ from app.models.persona import Persona
 from app.models.persona_skill import PersonaSkill
 from app.models.skill import Skill
 from app.models.contact import ContactMessage
+from app.models.waitlist import WaitlistEntry
 
 __all__ = [
     "Base",
@@ -19,4 +20,5 @@ __all__ = [
     "PasswordResetToken",
     "OAuthLinkToken",
     "ContactMessage",
+    "WaitlistEntry",
 ]
