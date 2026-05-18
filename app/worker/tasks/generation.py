@@ -110,7 +110,7 @@ def generate_persona(
     # to avoid circular imports with the Celery worker):
     #
     #   from app.db.session import AsyncSessionLocal
-    #   from app.llm.factory import get_llm_adapter
+    #   from app.service.llm.factory import get_llm_adapter
     #   from app.models.persona import Persona
     #   from app.models.persona_skill import PersonaSkill
     #   from app.models.chat_session import ChatSession
