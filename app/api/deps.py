@@ -109,5 +109,6 @@ def require_admin(user: CurrentUser) -> User:
 CanGenerate = Annotated[User, Depends(require_can_generate)]
 CanRefine = Annotated[User, Depends(require_can_refine)]
 ProUser = Annotated[User, Depends(require_pro)]
+AdminUser = Annotated[User, Depends(get_current_admin)]
 AdminRequired = Annotated[User, Depends(require_admin)]
 PaginationParams = Annotated[PageParams, Depends(PageParams)]
