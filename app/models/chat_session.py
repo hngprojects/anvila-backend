@@ -24,6 +24,9 @@ class ChatSession(BaseModel):
         nullable=False,
         index=True,
     )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     status: Mapped[SessionStatus] = mapped_column(
         String(20),
         nullable=False,
@@ -38,7 +41,7 @@ class ChatSession(BaseModel):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # relationships
-    persona: Mapped["Persona"] = relationship(back_populates="chat_sessions")
+    persona: Mapped["Persona"] = relationship(back_populates="chat_session")
     user: Mapped["User"] = relationship(back_populates="chat_sessions")
     messages: Mapped[list["ConversationMessage"]] = relationship(
         back_populates="session",
