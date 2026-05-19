@@ -1,0 +1,97 @@
+import asyncio
+import os
+import uuid
+from collections.abc import AsyncGenerator
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
+
+from app.core.security import create_access_token
+from app.db.session import get_session
+from app.main import app
+from app.models.base import Base
+from app.models.enums import UserPlan, UserProvider
+from app.models.user import User
+
+# Env setdefaults live in tests/conftest.py — must run before app.core.config
+# is imported by any test module.
+
+TEST_DB_URL = os.environ["DATABASE_URL"]
+
+if "test" not in TEST_DB_URL.lower():
+    raise RuntimeError(
+        f"DATABASE_URL does not look like a test database: {TEST_DB_URL!r}. "
+        "Refusing to run destructive test operations against a non-test database."
+    )
+
+
+def _make_engine():
+    return create_async_engine(TEST_DB_URL, echo=False, poolclass=NullPool)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def create_test_tables():
+    async def _setup():
+        engine = _make_engine()
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await engine.dispose()
+
+    async def _teardown():
+        engine = _make_engine()
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+
+    asyncio.run(_setup())
+    yield
+    asyncio.run(_teardown())
+
+
+@pytest.fixture()
+async def db_session() -> AsyncGenerator[AsyncSession, None]:
+    engine = _make_engine()
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        yield session
+    table_names = ", ".join(t.name for t in Base.metadata.sorted_tables)
+    async with engine.begin() as conn:
+        await conn.execute(text(f"TRUNCATE {table_names} RESTART IDENTITY CASCADE"))
+    await engine.dispose()
+
+
+@pytest.fixture()
+async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    async def _override_get_session() -> AsyncGenerator[AsyncSession, None]:
+        yield db_session
+
+    app.dependency_overrides[get_session] = _override_get_session
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            yield ac
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+
+
+@pytest.fixture()
+async def test_user(db_session: AsyncSession) -> User:
+    user = User(
+        email=f"test-user-{uuid.uuid4().hex[:8]}@test.local",
+        provider=UserProvider.EMAIL,
+        plan=UserPlan.FREE,
+        email_verified=True,
+        is_active=True,
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    return user
+
+
+@pytest.fixture()
+def auth_headers(test_user: User) -> dict[str, str]:
+    token = create_access_token(str(test_user.id))
+    return {"Authorization": f"Bearer {token}"}
