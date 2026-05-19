@@ -38,3 +38,23 @@ def test_settings_boot_fails_when_flag_on_and_creds_missing(monkeypatch):
     message = str(exc_info.value)
     for var in _GITHUB_VARS:
         assert var in message
+
+
+def test_settings_boot_fails_when_llm_provider_gemini_and_key_missing(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(_env_file=None, **_REQUIRED_NON_GITHUB)
+
+    assert "GEMINI_API_KEY" in str(exc_info.value)
+
+
+def test_settings_boot_succeeds_when_llm_provider_gemini_and_key_set(monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    s = Settings(_env_file=None, **_REQUIRED_NON_GITHUB)
+
+    assert s.LLM_PROVIDER == "gemini"
+    assert s.GEMINI_API_KEY == "test-key"
