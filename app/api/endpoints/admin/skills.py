@@ -12,10 +12,13 @@ router = APIRouter(prefix="/skills")
 
 
 @router.post("/sync", response_model=ApiResponse)
-async def sync_skills(user: AdminUser) -> ApiResponse:
+async def sync_skills(
+    user: AdminUser,
+    category: str | None = None,
+    limit: int | None = None,
+    ) -> ApiResponse:
     """Synchronise skills from the external openclaw registry."""
-    
-    result = await sync_skills_from_registry()
+    result = await sync_skills_from_registry(category=category, limit=limit)
 
     return ApiResponse(
         success=True,
