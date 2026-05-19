@@ -132,6 +132,8 @@ async def _run_generation(
             session = await db.get(ChatSession, uuid.UUID(session_id))
             if persona is None or session is None:
                 raise _NoRetry("persona or session missing")
+            if session.persona_id != persona.id or session.user_id != persona.user_id:
+                raise _NoRetry("persona/session mismatch")
 
             if persona.status in (
                 PersonaStatus.GENERATED,
@@ -174,6 +176,11 @@ async def _run_generation(
                     break
 
                 if kind == "clarification":
+                    if session.clarification_round >= MAX_CLARIFICATION_ROUNDS:
+                        persona.status = PersonaStatus.FAILED
+                        persona.error_code = "MAX_ROUNDS_REACHED"
+                        await db.commit()
+                        raise _NoRetry("max clarification rounds")
                     persona.status = PersonaStatus.NEEDS_CLARIFICATION
                     await db.commit()
                     payload = {

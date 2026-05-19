@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -20,10 +21,10 @@ from app.models.user import User
 # is imported by any test module.
 
 TEST_DB_URL = os.environ["DATABASE_URL"]
-
-if "test" not in TEST_DB_URL.lower():
+_db_name = (make_url(TEST_DB_URL).database or "").lower()
+if not (_db_name.endswith("_test") or _db_name.startswith("test_")):
     raise RuntimeError(
-        f"DATABASE_URL does not look like a test database: {TEST_DB_URL!r}. "
+        f"DATABASE_URL is not an approved test database name: {_db_name!r}. "
         "Refusing to run destructive test operations against a non-test database."
     )
 

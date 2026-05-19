@@ -97,11 +97,16 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     LLM_PROVIDER: str = "gemini"
     GEMINI_API_KEY: str | None = None
+    GEMINI_TIMEOUT_SECONDS: Annotated[int, Field(gt=0)] = 30
 
     @model_validator(mode="after")
     def _validate_llm_credentials(self) -> "Settings":
-        if self.LLM_PROVIDER == "gemini" and not self.GEMINI_API_KEY:
+        provider = self.LLM_PROVIDER.strip().lower()
+        if provider not in {"gemini"}:
+            raise ValueError(f"Unsupported LLM_PROVIDER: {self.LLM_PROVIDER!r}")
+        if provider == "gemini" and not (self.GEMINI_API_KEY and self.GEMINI_API_KEY.strip()):
             raise ValueError("LLM_PROVIDER='gemini' requires GEMINI_API_KEY to be set.")
+        self.LLM_PROVIDER = provider
         return self
 
 
