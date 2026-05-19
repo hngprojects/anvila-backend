@@ -218,6 +218,7 @@ async def _get_seeded_skills(
     result = await db.execute(query.limit(limit))
     return list(result.scalars().all())
 
+
 def _safe_int(value: Any, default: int = 0) -> int:
     try:
         return int(value)

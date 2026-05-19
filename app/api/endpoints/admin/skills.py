@@ -58,12 +58,12 @@ async def create_skill(
     db.add(skill)
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Skill slug already exists",
-        )
+        ) from exc
     await db.refresh(skill)
 
     return ApiResponse[SkillRead](
