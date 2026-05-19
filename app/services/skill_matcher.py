@@ -5,12 +5,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-
 from app.models.enums import SkillSourceRegistry
 from app.models.skill import Skill
 from app.services.openclaw_client import (
-    fetch_openclaw_skill_markdown,
     fetch_openclaw_skill,
+    fetch_openclaw_skill_markdown,
     search_openclaw_skills,
 )
 
@@ -96,13 +95,18 @@ async def _upsert_openclaw_skill(
     db: AsyncSession,
 ) -> Skill | None:
     """Create or update an OpenClaw skill using slug as the unique key."""
-    slug = str(
-        detail.get("slug")
-        or item.get("slug")
-        or detail.get("displayName")
-        or item.get("displayName")
-        or ""
-    ).strip().lower().replace(" ", "-")
+    slug = (
+        str(
+            detail.get("slug")
+            or item.get("slug")
+            or detail.get("displayName")
+            or item.get("displayName")
+            or ""
+        )
+        .strip()
+        .lower()
+        .replace(" ", "-")
+    )
 
     if not slug:
         return None
@@ -113,28 +117,33 @@ async def _upsert_openclaw_skill(
     skill = result.scalar_one_or_none()
 
     if skill is None:
+        skill_ref = item.get("id") or item.get("slug") or ""
         skill = Skill(
             slug=slug,
-            name=detail.get("displayName") or item.get("displayName") or slug.replace("-", " ").title(),
-            description=detail.get("summary") or detail.get("description") or item.get("summary") or item.get("description") or "",
+            name=detail.get("displayName")
+            or item.get("displayName")
+            or slug.replace("-", " ").title(),
+            description=detail.get("summary")
+            or detail.get("description")
+            or item.get("summary")
+            or item.get("description")
+            or "",
             content=content,
             category=detail.get("category") or item.get("category") or category,
             tags=detail.get("tags") or item.get("tags") or [],
             source_registry=SkillSourceRegistry.OPENCLAW,
-            source_url=detail.get("url") or item.get("url") or f"{settings.OPENCLAW_API_BASE.rstrip('/')}/skills/{item.get('id') or item.get('slug') or ''}/file?path=skill.md",
+            source_url=detail.get("url")
+            or item.get("url")
+            or f"{settings.OPENCLAW_API_BASE.rstrip('/')}/skills/{skill_ref}/file?path=skill.md",
             source_author=(
-                        (detail.get("owner") or {}).get("displayName")
-                        or (item.get("owner") or {}).get("displayName")
-                        or detail.get("handle")
-                        or item.get("handle")
-                    ),
+                (detail.get("owner") or {}).get("displayName")
+                or (item.get("owner") or {}).get("displayName")
+                or detail.get("handle")
+                or item.get("handle")
+            ),
             install_count=int(
-                (
-                    detail.get("stats") or {}
-                ).get("downloads")
-                or (
-                    item.get("stats") or {}
-                ).get("downloads")
+                (detail.get("stats") or {}).get("downloads")
+                or (item.get("stats") or {}).get("downloads")
                 or detail.get("install_count")
                 or item.get("install_count")
                 or 0
@@ -144,12 +153,24 @@ async def _upsert_openclaw_skill(
         db.add(skill)
     else:
         skill.name = detail.get("displayName") or item.get("displayName") or skill.name
-        skill.description = detail.get("summary") or detail.get("description") or item.get("summary") or item.get("description") or skill.description
+        skill.description = (
+            detail.get("summary")
+            or detail.get("description")
+            or item.get("summary")
+            or item.get("description")
+            or skill.description
+        )
         skill.content = content or skill.content
         skill.category = detail.get("category") or item.get("category") or skill.category
         skill.tags = detail.get("tags") or item.get("tags") or skill.tags
         skill.source_registry = SkillSourceRegistry.OPENCLAW
-        skill.source_url = detail.get("url") or item.get("url") or f"{settings.OPENCLAW_API_BASE.rstrip('/')}/skills/{item.get('id') or item.get('slug') or ''}/file?path=skill.md" or skill.source_url
+        skill_ref = item.get("id") or item.get("slug") or ""
+        skill.source_url = (
+            detail.get("url")
+            or item.get("url")
+            or f"{settings.OPENCLAW_API_BASE.rstrip('/')}/skills/{skill_ref}/file?path=skill.md"
+            or skill.source_url
+        )
         skill.source_author = (
             (detail.get("owner") or {}).get("displayName")
             or (item.get("owner") or {}).get("displayName")

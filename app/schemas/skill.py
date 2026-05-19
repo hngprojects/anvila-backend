@@ -1,5 +1,7 @@
-from pydantic import BaseModel, Field
 from uuid import UUID
+
+from pydantic import BaseModel, Field
+
 
 class SkillRead(BaseModel):
     id: UUID

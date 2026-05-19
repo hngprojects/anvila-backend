@@ -27,17 +27,11 @@ async def list_skills(
             )
         )
 
-    total_result = await db.execute(
-        select(func.count()).select_from(Skill).where(*filters)
-    )
+    total_result = await db.execute(select(func.count()).select_from(Skill).where(*filters))
     total = total_result.scalar_one()
 
     result = await db.execute(
-        select(Skill)
-        .where(*filters)
-        .order_by(Skill.name.asc())
-        .limit(limit)
-        .offset(offset)
+        select(Skill).where(*filters).order_by(Skill.name.asc()).limit(limit).offset(offset)
     )
 
     return list(result.scalars().all()), total

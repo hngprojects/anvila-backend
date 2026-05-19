@@ -1,10 +1,10 @@
-from app.schemas.shared import ApiResponse
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import AdminUser, DBSession
 from app.models.enums import SkillSourceRegistry
 from app.models.skill import Skill
+from app.schemas.shared import ApiResponse
 from app.schemas.skill import SkillCreateRequest, SkillRead, SkillUpdateRequest
 from app.services.skill_sync import sync_skills_from_registry
 
@@ -16,7 +16,7 @@ async def sync_skills(
     user: AdminUser,
     category: str | None = None,
     limit: int | None = None,
-    ) -> ApiResponse:
+) -> ApiResponse:
     """Synchronise skills from the external openclaw registry."""
     result = await sync_skills_from_registry(category=category, limit=limit)
 
@@ -59,9 +59,7 @@ async def create_skill(
     await db.refresh(skill)
 
     return ApiResponse[SkillRead](
-        success= True,
-        message= "Skill created successfully",
-        data=SkillRead.model_validate(skill)
+        success=True, message="Skill created successfully", data=SkillRead.model_validate(skill)
     )
 
 
@@ -101,9 +99,9 @@ async def update_skill(
     await db.refresh(skill)
 
     return ApiResponse[SkillRead](
-        success= True,
-        message= f"Skill {slug} updated successfully",
-        data=SkillRead.model_validate(skill)
+        success=True,
+        message=f"Skill {slug} updated successfully",
+        data=SkillRead.model_validate(skill),
     )
 
 

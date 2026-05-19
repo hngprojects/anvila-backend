@@ -4,13 +4,12 @@ from typing import Any
 from sqlalchemy import select
 
 from app.core.config import settings
-
 from app.db.session import AsyncSessionLocal
 from app.models.enums import SkillSourceRegistry
 from app.models.skill import Skill
 from app.services.openclaw_client import (
-    list_openclaw_skills,
     fetch_openclaw_skill_markdown,
+    list_openclaw_skills,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,7 +33,6 @@ async def sync_skills_from_registry(category: str | None = None, limit: int | No
 
             if not slug:
                 continue
-            
 
             content = await fetch_openclaw_skill_markdown(item.get("id") or item.get("slug") or "")
 
@@ -42,33 +40,21 @@ async def sync_skills_from_registry(category: str | None = None, limit: int | No
             skill = result.scalar_one_or_none()
 
             if skill is None:
+                skill_ref = item.get("id") or item.get("slug") or ""
                 skill = Skill(
                     slug=slug,
-                    name=(
-                        item.get("displayName")
-                        or item.get("name")
-                        or slug
-                    ),
-                    description=(
-                        item.get("summary")
-                        or item.get("description")
-                        or ""
-                    ),
+                    name=(item.get("displayName") or item.get("name") or slug),
+                    description=(item.get("summary") or item.get("description") or ""),
                     content=content,
                     category=item.get("category"),
                     tags=item.get("tags") or [],
                     source_registry=SkillSourceRegistry.OPENCLAW,
-                    source_url= f"{settings.OPENCLAW_API_BASE.rstrip('/')}/skills/{item.get("id") or item.get("slug") or ""}/file?path=skill.md",
+                    source_url=f"{settings.OPENCLAW_API_BASE.rstrip('/')}/skills/{skill_ref}/file?path=skill.md",
                     source_author=(
-                        (item.get("owner") or {}).get("displayName")
-                        or item.get("handle")
+                        (item.get("owner") or {}).get("displayName") or item.get("handle")
                     ),
                     install_count=int(
-                        (
-                            item.get("stats") or {}
-                        ).get("downloads")
-                        or item.get("install_count")
-                        or 0
+                        (item.get("stats") or {}).get("downloads") or item.get("install_count") or 0
                     ),
                     is_active=True,
                 )
@@ -76,30 +62,26 @@ async def sync_skills_from_registry(category: str | None = None, limit: int | No
                 added += 1
 
             else:
-                skill.name = (
-                    item.get("displayName")
-                    or item.get("name")
-                    or skill.name
-                )
+                skill.name = item.get("displayName") or item.get("name") or skill.name
                 skill.description = (
-                    item.get("summary")
-                    or item.get("description")
-                    or skill.description
+                    item.get("summary") or item.get("description") or skill.description
                 )
                 skill.content = content or skill.content
                 skill.category = item.get("category") or skill.category
                 skill.tags = item.get("tags") or skill.tags
                 skill.source_registry = SkillSourceRegistry.OPENCLAW
-                skill.source_url = f"{settings.OPENCLAW_API_BASE.rstrip('/')}/skills/{item.get("id") or item.get("slug") or ""}/file?path=skill.md" or skill.source_url
+                skill_ref = item.get("id") or item.get("slug") or ""
+                skill.source_url = (
+                    f"{settings.OPENCLAW_API_BASE.rstrip('/')}/skills/{skill_ref}/file?path=skill.md"
+                    or skill.source_url
+                )
                 skill.source_author = (
                     (item.get("owner") or {}).get("displayName")
                     or item.get("handle")
                     or skill.source_author
                 )
                 skill.install_count = int(
-                    (
-                        item.get("stats") or {}
-                    ).get("downloads")
+                    (item.get("stats") or {}).get("downloads")
                     or item.get("install_count")
                     or skill.install_count
                     or 0

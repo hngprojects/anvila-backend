@@ -167,11 +167,7 @@ async def fetch_github_verified_emails(
 
 def resolve_primary_verified_email(emails: list[dict[str, Any]]) -> str | None:
     primary_verified = next(
-        (
-            entry.get("email")
-            for entry in emails
-            if entry.get("primary") and entry.get("verified")
-        ),
+        (entry.get("email") for entry in emails if entry.get("primary") and entry.get("verified")),
         None,
     )
     if primary_verified:
@@ -310,8 +306,7 @@ async def process_github_callback(
             provider_subject=subject,
         )
         _logger.info(
-            "event=auth.oauth.github.link_pending outcome=link_required "
-            "user_id=%s email_hash=%s",
+            "event=auth.oauth.github.link_pending outcome=link_required user_id=%s email_hash=%s",
             existing_by_email.id,
             email_hash,
         )
@@ -391,12 +386,9 @@ async def process_github_callback(
             github_subject=subject,
         )
 
-    access_token, raw_refresh = await _mint_session_tokens(
-        db, user=new_user, request=request
-    )
+    access_token, raw_refresh = await _mint_session_tokens(db, user=new_user, request=request)
     _logger.info(
-        "event=auth.oauth.github.callback.success outcome=new_user "
-        "user_id=%s email_hash=%s",
+        "event=auth.oauth.github.callback.success outcome=new_user user_id=%s email_hash=%s",
         new_user.id,
         email_hash,
     )

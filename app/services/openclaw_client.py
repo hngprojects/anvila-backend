@@ -7,11 +7,17 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-async def list_openclaw_skills(category: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+
+async def list_openclaw_skills(
+    category: str | None = None, limit: int = 50
+) -> list[dict[str, Any]]:
     """List recent OpenClaw/ClawHub skills with optional category filtering."""
     url = f"{settings.OPENCLAW_API_BASE.rstrip('/')}/skills"
 
-    params: dict[str, Any] = {"limit": limit, "nonSuspiciousOnly": "true",}
+    params: dict[str, Any] = {
+        "limit": limit,
+        "nonSuspiciousOnly": "true",
+    }
 
     if category:
         params["category"] = category
@@ -26,6 +32,7 @@ async def list_openclaw_skills(category: str | None = None, limit: int = 50) -> 
         return []
 
     return _extract_list(response.json())
+
 
 async def search_openclaw_skills(query: str, limit: int = 5) -> list[dict[str, Any]]:
     """Search OpenClaw/ClawHub skills by plain text query."""
@@ -70,6 +77,7 @@ async def fetch_openclaw_skill(skill_id: str) -> dict[str, Any] | None:
 
     return None
 
+
 async def fetch_openclaw_skill_markdown(skill_id: str) -> str:
     """Fetch the SKILL.md content of an OpenClaw/ClawHub skill."""
     url = f"{settings.OPENCLAW_API_BASE.rstrip('/')}/skills/{skill_id}/file?path=skill.md"
@@ -84,6 +92,7 @@ async def fetch_openclaw_skill_markdown(skill_id: str) -> str:
         return ""
 
     return response.text
+
 
 def _extract_list(payload: Any) -> list[dict[str, Any]]:
     """Normalize OpenClaw list/search responses into a list of dicts."""
