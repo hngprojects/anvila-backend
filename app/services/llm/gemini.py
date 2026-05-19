@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 import google.generativeai as genai
 
 from app.core.config import settings
@@ -6,6 +8,8 @@ from app.services.llm.types import LLMResponse
 
 
 class GeminiAdapter(LLMAdapter):
+    SYSTEM_PROMPT: ClassVar[str] = ""
+
     def __init__(self) -> None:
         genai.configure(api_key=settings.GEMINI_API_KEY)
         self._model_name: str = "gemini-2.0-flash"

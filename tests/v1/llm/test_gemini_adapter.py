@@ -77,3 +77,19 @@ async def test_is_healthy_returns_false_and_swallows_sdk_exception(patched_genai
 
     adapter = GeminiAdapter()
     assert await adapter.is_healthy() is False
+
+
+async def test_generate_propagates_when_response_text_raises(patched_genai, mocker):
+    # Gemini's response.text is a @property that raises ValueError when the
+    # candidate was blocked (safety filters) or empty. The adapter must let
+    # that propagate; is_healthy must still swallow it and return False.
+    fake_response = mocker.MagicMock()
+    type(fake_response).text = mocker.PropertyMock(side_effect=ValueError("blocked"))
+    patched_genai.model_instance.generate_content_async = AsyncMock(return_value=fake_response)
+
+    adapter = GeminiAdapter()
+
+    with pytest.raises(ValueError):
+        await adapter.generate("hello")
+
+    assert await adapter.is_healthy() is False
