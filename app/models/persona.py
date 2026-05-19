@@ -65,8 +65,10 @@ class Persona(BaseModel):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # relationships
-    chat_sessions: Mapped[list["ChatSession"]] = relationship(
-        back_populates="persona", cascade="all, delete-orphan"
+    chat_session: Mapped["ChatSession | None"] = relationship(
+        back_populates="persona",
+        cascade="all, delete-orphan",
+        uselist=False,
     )
 
     user: Mapped["User"] = relationship(back_populates="personas")

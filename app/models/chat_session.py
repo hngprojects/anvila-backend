@@ -24,9 +24,6 @@ class ChatSession(BaseModel):
         nullable=False,
         index=True,
     )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
     status: Mapped[SessionStatus] = mapped_column(
         String(20),
         nullable=False,
