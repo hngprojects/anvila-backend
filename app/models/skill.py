@@ -16,7 +16,7 @@ class Skill(BaseModel):
     __table_args__ = (Index("ix_skills_tags", "tags", postgresql_using="gin"),)
 
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    slug: Mapped[str] = mapped_column(String(220), nullable=False)
+    slug: Mapped[str] = mapped_column(String(220), nullable=False, unique=True, index=True)
     description: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[PersonaCategory | None] = mapped_column(String(50), index=True)
