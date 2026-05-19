@@ -11,6 +11,7 @@ from app.services.openclaw_client import (
     fetch_openclaw_skill_markdown,
     list_openclaw_skills,
 )
+from app.services.skill_matcher import _safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ async def sync_skills_from_registry(category: str | None = None, limit=50) -> di
                     source_author=(
                         (item.get("owner") or {}).get("displayName") or item.get("handle")
                     ),
-                    install_count=int(
+                    install_count=_safe_int(
                         (item.get("stats") or {}).get("downloads") or item.get("install_count") or 0
                     ),
                     is_active=True,

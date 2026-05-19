@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -36,6 +38,13 @@ async def create_skill(
 ) -> ApiResponse[SkillRead]:
     """Create a manually seeded Anvila skill."""
     slug = body.slug.strip().lower()
+
+    # Validate slug format (alphanumeric and hyphens only, non-empty)
+    if not slug or not re.match(r"^[a-z0-9]+(?:-[a-z0-9]+)*$", slug):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Slug must be non-empty and contain only lowercase alpha-numeric",
+        )
 
     existing = await db.execute(select(Skill).where(Skill.slug == slug))
     if existing.scalar_one_or_none():
