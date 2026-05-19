@@ -74,6 +74,14 @@ All admin endpoints require `AdminUser`.
 
 Syncs skills from OpenClaw into the local DB.
 
+### Query Parameters
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| category | string | No | Filters skills by external registry category |
+| limit | integer | No | Limits the number of skills fetched from the external registry |
+
+
 ### Response
 
 ```json
