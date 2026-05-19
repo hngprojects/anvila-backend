@@ -15,7 +15,7 @@ from app.services.openclaw_client import (
 logger = logging.getLogger(__name__)
 
 
-async def sync_skills_from_registry(category: str | None = None, limit: int | None = None) -> dict:
+async def sync_skills_from_registry(category: str | None = None, limit = 50) -> dict:
     """Fetch OpenClaw skills and upsert them into the local skills table."""
     try:
         skills_data = await list_openclaw_skills(category=category, limit=limit)

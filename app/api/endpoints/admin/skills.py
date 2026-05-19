@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import AdminUser, DBSession
 from app.models.enums import SkillSourceRegistry
@@ -55,7 +56,14 @@ async def create_skill(
     )
 
     db.add(skill)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Skill slug already exists",
+        )
     await db.refresh(skill)
 
     return ApiResponse[SkillRead](

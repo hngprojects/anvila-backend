@@ -2,6 +2,7 @@ import logging
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -141,7 +142,7 @@ async def _upsert_openclaw_skill(
                 or detail.get("handle")
                 or item.get("handle")
             ),
-            install_count=int(
+            install_count=_safe_int(
                 (detail.get("stats") or {}).get("downloads")
                 or (item.get("stats") or {}).get("downloads")
                 or detail.get("install_count")
@@ -178,7 +179,7 @@ async def _upsert_openclaw_skill(
             or item.get("handle")
             or skill.source_author
         )
-        skill.install_count = int(
+        skill.install_count = _safe_int(
             (detail.get("stats") or {}).get("downloads")
             or (item.get("stats") or {}).get("downloads")
             or detail.get("install_count")
@@ -188,8 +189,11 @@ async def _upsert_openclaw_skill(
         )
         skill.is_active = True
 
-    await db.commit()
-    await db.refresh(skill)
+    async with db.begin_nested():
+        try:
+            await db.flush()
+        except IntegrityError:
+            pass
 
     return skill
 
@@ -213,3 +217,9 @@ async def _get_seeded_skills(
 
     result = await db.execute(query.limit(limit))
     return list(result.scalars().all())
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default

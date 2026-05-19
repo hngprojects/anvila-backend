@@ -1,4 +1,5 @@
 import logging
+import json
 from typing import Any
 
 import httpx
@@ -9,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 async def list_openclaw_skills(
-    category: str | None = None, limit: int = 50
+    category: str | None = None, limit: int | None = None
 ) -> list[dict[str, Any]]:
     """List recent OpenClaw/ClawHub skills with optional category filtering."""
     url = f"{settings.OPENCLAW_API_BASE.rstrip('/')}/skills"
@@ -27,7 +28,7 @@ async def list_openclaw_skills(
             response = await client.get(url, params=params)
             response.raise_for_status()
 
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
         logger.warning("OpenClaw skill list failed for category %s: %s", category, exc)
         return []
 
@@ -50,7 +51,7 @@ async def search_openclaw_skills(query: str, limit: int = 5) -> list[dict[str, A
             )
             response.raise_for_status()
 
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
         logger.warning("OpenClaw skill search failed for %s: %s", query, exc)
         return []
 
@@ -66,7 +67,7 @@ async def fetch_openclaw_skill(skill_id: str) -> dict[str, Any] | None:
             response = await client.get(url)
             response.raise_for_status()
 
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
         logger.warning("OpenClaw skill fetch failed for %s: %s", skill_id, exc)
         return None
 
@@ -87,7 +88,7 @@ async def fetch_openclaw_skill_markdown(skill_id: str) -> str:
             response = await client.get(url)
             response.raise_for_status()
 
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
         logger.warning("OpenClaw skill markdown fetch failed for %s: %s", skill_id, exc)
         return ""
 

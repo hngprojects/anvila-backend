@@ -25,7 +25,9 @@ Returns active skills from the local database.
 | Param | Description |
 |---|---|
 | search | searches name + description |
+| category | filters by skill category |
 | limit | pagination limit |
+| offset | pagination offset |
 
 ### Example
 
