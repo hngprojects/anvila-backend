@@ -1,28 +1,24 @@
+import io
+
+import docx2txt
+import pdfplumber
 from fastapi import UploadFile
+
+MAX_CHARS = 8000
 
 
 async def extract_text(file: UploadFile) -> str:
-    # 1. Read the file content into memory: content = await file.read()
-    #
-    # 2. Check file.filename extension (lowercase):
-    #
-    #    .pdf:
-    #      Use pdfplumber.open(io.BytesIO(content))
-    #      Extract text from each page: page.extract_text() or ""
-    #      Join pages with "\n"
-    #
-    #    .docx:
-    #      Use docx2txt.process(io.BytesIO(content))
-    #
-    #    .txt or .md:
-    #      content.decode("utf-8")
-    #
-    #    anything else:
-    #      raise ValueError(f"Unsupported file type: {file.filename}")
-    #      The endpoint catches this and returns HTTP 400.
-    #
-    # 3. Truncate result to 8000 characters.
-    #    No flag needed — the generate endpoint just uses whatever is returned.
-    #
-    # 4. Return the extracted string.
-    raise NotImplementedError
+    content = await file.read()
+    name = (file.filename or "").lower()
+
+    if name.endswith(".pdf"):
+        with pdfplumber.open(io.BytesIO(content)) as pdf:
+            text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    elif name.endswith(".docx"):
+        text = docx2txt.process(io.BytesIO(content))
+    elif name.endswith((".txt", ".md")):
+        text = content.decode("utf-8", errors="replace")
+    else:
+        raise ValueError(f"Unsupported file type: {file.filename}")
+
+    return text[:MAX_CHARS]
