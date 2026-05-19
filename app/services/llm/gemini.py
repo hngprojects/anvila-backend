@@ -1,3 +1,4 @@
+import asyncio
 from typing import ClassVar
 
 import google.generativeai as genai
@@ -19,7 +20,10 @@ class GeminiAdapter(LLMAdapter):
         return prompt
 
     async def generate(self, prompt: str) -> LLMResponse:
-        response = await self._model.generate_content_async(prompt)
+        response = await asyncio.wait_for(
+            self._model.generate_content_async(prompt),
+            timeout=settings.GEMINI_TIMEOUT_SECONDS,
+        )
         usage = response.usage_metadata
         return LLMResponse(
             content=response.text,
