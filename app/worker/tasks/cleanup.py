@@ -1,20 +1,21 @@
+import asyncio
+import logging
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from app.worker.celery_app import celery_app
 
 PURGE_AFTER_DAYS = 30
 
+logger = logging.getLogger(__name__)
+
 
 @celery_app.task
 def purge_soft_deleted() -> dict:
-    import asyncio
-    import logging
-    from datetime import UTC, datetime, timedelta
-
-    from sqlalchemy import delete, select
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-    logger = logging.getLogger(__name__)
-
     async def _run() -> dict:
+        # App imports deferred to avoid circular imports at Celery worker startup
         from app.core.config import settings
         from app.models.chat_session import ChatSession
         from app.models.conversation_message import ConversationMessage

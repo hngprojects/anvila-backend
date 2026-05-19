@@ -90,7 +90,7 @@ async def test_list_users_filter_paid(
 async def test_list_users_pagination_limit(
     client: AsyncClient, admin_user: User, free_user: User, paid_user: User
 ):
-    resp = await client.get(f"{BASE}/users?limit=1&offset=0", headers=auth_headers(admin_user))
+    resp = await client.get(f"{BASE}/users?page=1&size=1", headers=auth_headers(admin_user))
     assert resp.status_code == 200
     assert len(resp.json()["users"]) == 1
 
@@ -98,11 +98,11 @@ async def test_list_users_pagination_limit(
 async def test_list_users_pagination_offset(
     client: AsyncClient, admin_user: User, free_user: User, paid_user: User
 ):
-    resp_all = await client.get(f"{BASE}/users?limit=100", headers=auth_headers(admin_user))
+    resp_all = await client.get(f"{BASE}/users?size=100", headers=auth_headers(admin_user))
     all_ids = [u["id"] for u in resp_all.json()["users"]]
 
     resp_page = await client.get(
-        f"{BASE}/users?limit=1&offset=1", headers=auth_headers(admin_user)
+        f"{BASE}/users?page=2&size=1", headers=auth_headers(admin_user)
     )
     page_ids = [u["id"] for u in resp_page.json()["users"]]
     assert page_ids[0] == all_ids[1]
