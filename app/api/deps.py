@@ -58,9 +58,6 @@ async def get_current_admin(current_user: CurrentUser) -> User:
     return current_user
 
 
-AdminUser = Annotated[User, Depends(get_current_admin)]
-
-
 def require_can_generate(user: CurrentUser) -> User:
     if user.plan == UserPlan.FREE and user.generation_count >= 3:
         raise HTTPException(
