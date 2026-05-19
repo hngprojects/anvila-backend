@@ -92,6 +92,18 @@ class Settings(BaseSettings):
             )
         return self
 
+    # ------------------------------------------------------------------
+    # LLM
+    # ------------------------------------------------------------------
+    LLM_PROVIDER: str = "gemini"
+    GEMINI_API_KEY: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_llm_credentials(self) -> "Settings":
+        if self.LLM_PROVIDER == "gemini" and not self.GEMINI_API_KEY:
+            raise ValueError("LLM_PROVIDER='gemini' requires GEMINI_API_KEY to be set.")
+        return self
+
 
 @lru_cache
 def get_settings() -> Settings:
