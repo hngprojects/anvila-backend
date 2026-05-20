@@ -4,7 +4,7 @@ from typing import Annotated, Any
 
 from fastapi import Query
 from pydantic import BaseModel
-from sqlalchemy import Select, and_, func, or_, select
+from sqlalchemy import Select, and_, func, inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -98,32 +98,59 @@ async def cursor_paginate(
     descending: bool = True,
 ) -> tuple[list[Any], CursorMeta]:
     """
-    Cursor-based pagination for time-ordered append-only datasets.
+    Cursor-based pagination with a composite keyset (sort_col, pk).
 
-    Returns:
-        (items, meta) where items is a plain list of ORM objects.
-
-    Example — sessions list (newest first):
-        rows, meta = await cursor_paginate(
-            db, select(ChatSession).where(...),
-            params, ChatSession, "last_message_at", descending=True
-        )
-
+    Safe for nullable sort values and duplicate sort values.
     """
     sort_col = getattr(model, cursor_field)
 
-    # If a cursor was provided, find the sort value of that record
-    # and filter to only records that come after it.
+    # Resolve the primary key column name (assumes single-column PK).
+    pk_attr = inspect(model).primary_key[0].name
+    pk_col = getattr(model, pk_attr)
+
     if params.cursor:
         cursor_record = await db.get(model, params.cursor)
         if cursor_record:
             cursor_value = getattr(cursor_record, cursor_field)
-            if descending:
-                query = query.where(sort_col < cursor_value)
-            else:
-                query = query.where(sort_col > cursor_value)
+            cursor_id = getattr(cursor_record, pk_attr)
 
-    ordered_query = query.order_by(sort_col.desc() if descending else sort_col.asc())
+            if descending:
+                if cursor_value is None:
+                    query = query.where(and_(sort_col.is_(None), pk_col < cursor_id))
+                else:
+                    query = query.where(
+                        or_(
+                            sort_col < cursor_value,
+                            and_(sort_col == cursor_value, pk_col < cursor_id),
+                            sort_col.is_(None),
+                        )
+                    )
+            else:
+                if cursor_value is None:
+                    query = query.where(
+                        or_(
+                            and_(sort_col.is_(None), pk_col > cursor_id),
+                            sort_col.isnot(None),
+                        )
+                    )
+                else:
+                    query = query.where(
+                        or_(
+                            sort_col > cursor_value,
+                            and_(sort_col == cursor_value, pk_col > cursor_id),
+                        )
+                    )
+
+    if descending:
+        ordered_query = query.order_by(
+            sort_col.desc().nulls_last(),
+            pk_col.desc(),
+        )
+    else:
+        ordered_query = query.order_by(
+            sort_col.asc().nulls_first(),
+            pk_col.asc(),
+        )
 
     result = await db.scalars(ordered_query.limit(params.size + 1))
     rows = result.all()
@@ -131,7 +158,7 @@ async def cursor_paginate(
     has_more = len(rows) > params.size
     items = list(rows[: params.size])
 
-    next_cursor = items[-1].id if has_more and items else None
+    next_cursor = getattr(items[-1], pk_attr) if has_more and items else None
 
     meta = CursorMeta(
         size=params.size,
