@@ -24,12 +24,12 @@ class GeminiAdapter(LLMAdapter):
             self._model.generate_content_async(prompt),
             timeout=settings.GEMINI_TIMEOUT_SECONDS,
         )
-        usage = response.usage_metadata
+        usage = getattr(response, "usage_metadata", None)
         return LLMResponse(
             content=response.text,
-            input_tokens=usage.prompt_token_count,
-            output_tokens=usage.candidates_token_count,
-            total_tokens=usage.total_token_count,
+            input_tokens=getattr(usage, "prompt_token_count", 0),
+            output_tokens=getattr(usage, "candidates_token_count", 0),
+            total_tokens=getattr(usage, "total_token_count", 0),
             model=self._model_name,
         )
 

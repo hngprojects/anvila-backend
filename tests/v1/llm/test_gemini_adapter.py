@@ -48,6 +48,24 @@ async def test_generate_returns_llm_response_with_all_fields_populated(patched_g
     patched_genai.model_instance.generate_content_async.assert_awaited_once_with("hello")
 
 
+async def test_generate_handles_missing_usage_metadata(patched_genai):
+    # Gemini SDK can return responses where usage_metadata is None or
+    # missing (some models, certain error paths). Adapter must default
+    # token fields to 0 instead of crashing on AttributeError.
+    patched_genai.model_instance.generate_content_async = AsyncMock(
+        return_value=SimpleNamespace(text="hello world", usage_metadata=None)
+    )
+
+    adapter = GeminiAdapter()
+    response = await adapter.generate("hello")
+
+    assert response.content == "hello world"
+    assert response.input_tokens == 0
+    assert response.output_tokens == 0
+    assert response.total_tokens == 0
+    assert response.model == "gemini-2.0-flash"
+
+
 def test_build_prompt_is_identity_passthrough(patched_genai):
     adapter = GeminiAdapter()
     assert adapter.build_prompt("hello") == "hello"
