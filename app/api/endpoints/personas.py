@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from redis.asyncio import Redis
+from sqlalchemy import case, update
 
 from app.api.deps import CanGenerate, CurrentUser, DBSession
 from app.core.config import settings
@@ -16,6 +17,7 @@ from app.models.enums import (
     PersonaVisibility,
 )
 from app.models.persona import Persona
+from app.models.user import User
 from app.schemas.personas import (
     ClarifyRequest,
     ClarifyResponse,
@@ -99,7 +101,16 @@ async def generate(
             file_content,
         )
     except Exception as exc:
-        user.generation_count = max(0, user.generation_count - 1)
+        await db.execute(
+            update(User)
+            .where(User.id == user.id)
+            .values(
+                generation_count=case(
+                    (User.generation_count > 0, User.generation_count - 1),
+                    else_=0,
+                )
+            )
+        )
         persona.status = PersonaStatus.FAILED
         persona.error_code = "QUEUE_UNAVAILABLE"
         await db.commit()
