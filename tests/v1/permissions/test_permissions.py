@@ -4,7 +4,7 @@ Permission dependency unit tests.
 These test the four guard functions directly — no HTTP, no DB.
 Each function accepts a User-like object and either returns it or raises HTTPException.
 """
-from unittest.mock import MagicMock
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -18,13 +18,15 @@ def _user(
     generation_count: int = 0,
     refine_used: bool = False,
     is_admin: bool = False,
-) -> MagicMock:
-    u = MagicMock()
-    u.plan = plan
-    u.generation_count = generation_count
-    u.refine_used = refine_used
-    u.is_admin = is_admin
-    return u
+    is_super_admin: bool = False,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        plan=plan,
+        generation_count=generation_count,
+        refine_used=refine_used,
+        is_admin=is_admin,
+        is_super_admin=is_super_admin,
+    )
 
 
 # ── require_can_generate ──────────────────────────────────────────────────────

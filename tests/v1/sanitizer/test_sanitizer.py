@@ -108,4 +108,4 @@ def test_three_or_more_spaces_collapsed(sanitizer: PromptSanitizer):
 def test_mixed_whitespace_collapsed(sanitizer: PromptSanitizer):
     result = sanitizer.sanitize("hello\n\n\nworld")
     inner = result.removeprefix("<USER_INPUT>\n").removesuffix("\n</USER_INPUT>")
-    assert "   " not in inner
+    assert "\n\n\n" not in inner

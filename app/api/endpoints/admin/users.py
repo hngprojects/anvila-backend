@@ -37,7 +37,7 @@ async def list_users(
     _: AdminUser,
     db: DBSession,
     page_params: PaginationParams,
-    plan: str | None = Query(None),
+    plan: UserPlan | None = Query(default=None),  # noqa: B008
 ) -> dict:
     query = select(User).order_by(User.created_at.desc())
     if plan is not None:

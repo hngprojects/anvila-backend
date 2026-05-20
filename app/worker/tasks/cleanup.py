@@ -23,29 +23,30 @@ def purge_soft_deleted() -> dict:
 
         cutoff = datetime.now(UTC) - timedelta(days=PURGE_AFTER_DAYS)
         engine = create_async_engine(str(settings.DATABASE_URL))
-        factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-        async with factory() as db:
-            msg_res = await db.execute(
-                delete(ConversationMessage).where(
-                    ConversationMessage.session_id.in_(
-                        select(ChatSession.id).where(ChatSession.deleted_at < cutoff)
+        try:
+            factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+            async with factory() as db:
+                msg_res = await db.execute(
+                    delete(ConversationMessage).where(
+                        ConversationMessage.session_id.in_(
+                            select(ChatSession.id).where(ChatSession.deleted_at < cutoff)
+                        )
                     )
                 )
-            )
-            await db.commit()
+                await db.commit()
 
-            sess_res = await db.execute(
-                delete(ChatSession).where(ChatSession.deleted_at < cutoff)
-            )
-            await db.commit()
+                sess_res = await db.execute(
+                    delete(ChatSession).where(ChatSession.deleted_at < cutoff)
+                )
+                await db.commit()
 
-            persona_res = await db.execute(
-                delete(Persona).where(Persona.deleted_at < cutoff)
-            )
-            await db.commit()
+                persona_res = await db.execute(
+                    delete(Persona).where(Persona.deleted_at < cutoff)
+                )
+                await db.commit()
+        finally:
+            await engine.dispose()
 
-        await engine.dispose()
         return {
             "messages_deleted": msg_res.rowcount,
             "sessions_deleted": sess_res.rowcount,
@@ -60,7 +61,12 @@ def purge_soft_deleted() -> dict:
             result["sessions_deleted"],
             result["personas_deleted"],
         )
-        return result
+        return {**result, "failed": False}
     except Exception:
         logger.exception("purge_soft_deleted failed")
-        return {"messages_deleted": 0, "sessions_deleted": 0, "personas_deleted": 0}
+        return {
+            "messages_deleted": 0,
+            "sessions_deleted": 0,
+            "personas_deleted": 0,
+            "failed": True,
+        }

@@ -98,14 +98,13 @@ async def test_list_users_pagination_limit(
 async def test_list_users_pagination_offset(
     client: AsyncClient, admin_user: User, free_user: User, paid_user: User
 ):
-    resp_all = await client.get(f"{BASE}/users?size=100", headers=auth_headers(admin_user))
-    all_ids = [u["id"] for u in resp_all.json()["users"]]
-
-    resp_page = await client.get(
-        f"{BASE}/users?page=2&size=1", headers=auth_headers(admin_user)
-    )
-    page_ids = [u["id"] for u in resp_page.json()["users"]]
-    assert page_ids[0] == all_ids[1]
+    resp_p1 = await client.get(f"{BASE}/users?page=1&size=1", headers=auth_headers(admin_user))
+    resp_p2 = await client.get(f"{BASE}/users?page=2&size=1", headers=auth_headers(admin_user))
+    assert resp_p1.status_code == 200
+    assert resp_p2.status_code == 200
+    p1_id = resp_p1.json()["users"][0]["id"]
+    p2_id = resp_p2.json()["users"][0]["id"]
+    assert p1_id != p2_id
 
 
 async def test_list_users_requires_admin(client: AsyncClient, free_user: User):

@@ -95,7 +95,7 @@ def require_pro(user: CurrentUser) -> User:
 
 
 def require_admin(user: CurrentUser) -> User:
-    if not user.is_admin:
+    if not user.is_admin and not user.is_super_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "FORBIDDEN", "message": "Admin access required."},
