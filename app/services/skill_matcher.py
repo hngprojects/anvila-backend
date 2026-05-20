@@ -67,7 +67,11 @@ async def _fetch_openclaw_skill(
     db: AsyncSession,
 ) -> Skill | None:
     """Search OpenClaw for a skill, fetch its full content."""
-    results = await search_openclaw_skills(query, limit=1)
+    try:
+        results = await search_openclaw_skills(query, limit=1)
+    except Exception as exc:
+        logger.warning("OpenClaw search failed for %s: %s", query, exc)
+        return None
 
     if not results:
         return None
@@ -124,7 +128,11 @@ async def _upsert_openclaw_skill(
         or item.get("name")
         or ""
     )
-    content = await fetch_openclaw_skill_markdown(skill_ref) if skill_ref else ""
+    try:
+        content = await fetch_openclaw_skill_markdown(skill_ref) if skill_ref else ""
+    except Exception as exc:
+        logger.warning("OpenClaw markdown fetch failed for skill %s: %s", skill_ref, exc)
+        content = ""
 
     values = {
         "name": (
@@ -218,6 +226,8 @@ async def _get_seeded_skills(
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, str):
+        value = value.strip().replace(",", "")
     try:
         return int(value)
     except (TypeError, ValueError):

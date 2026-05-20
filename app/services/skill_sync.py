@@ -147,6 +147,8 @@ def _install_count(item: dict[str, Any], fallback: int | None = 0) -> int:
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
+    if isinstance(value, str):
+        value = value.strip().replace(",", "")
     try:
         return int(value)
     except (TypeError, ValueError):
