@@ -20,29 +20,28 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    duplicate_slugs = (
-        op.get_bind()
-        .execute(
-            sa.text("""
-        SELECT slug, COUNT(*) AS count
-        FROM skills
-        WHERE slug IS NOT NULL
-        GROUP BY slug
-        HAVING COUNT(*) > 1
-    """)
-        )
-        .fetchall()
-    )
+    bind = op.get_bind()
 
-    if duplicate_slugs:
-        details = ", ".join(
-            f"{row._mapping['slug']!r} ({row._mapping['count']})" for row in duplicate_slugs[:20]
+    bind.execute(
+        sa.text("""
+        WITH duplicate_slugs AS (
+            SELECT
+                id,
+                slug,
+                ROW_NUMBER() OVER (
+                    PARTITION BY slug
+                    ORDER BY created_at ASC, id ASC
+                ) AS row_number
+            FROM skills
+            WHERE slug IS NOT NULL
         )
-        raise RuntimeError(
-            "Cannot create unique index ix_skills_slug because duplicate "
-            f"skills.slug values exist: {details}. "
-            "Please dedupe or backfill slugs before running this migration."
-        )
+        UPDATE skills
+        SET slug = LEFT(skills.slug, 210) || '-' || SUBSTRING(skills.id::text, 1, 8)
+        FROM duplicate_slugs
+        WHERE skills.id = duplicate_slugs.id
+        AND duplicate_slugs.row_number > 1
+        """)
+    )
 
     op.create_index(op.f("ix_skills_slug"), "skills", ["slug"], unique=True)
 

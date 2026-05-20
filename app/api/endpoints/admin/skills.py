@@ -1,13 +1,14 @@
 import re
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, status
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import AdminUser, DBSession
 from app.models.enums import SkillSourceRegistry
 from app.models.skill import Skill
-from app.schemas.shared import ApiResponse
+from app.schemas.shared import ApiResponse, ErrorDetail
 from app.schemas.skill import SkillCreateRequest, SkillRead, SkillUpdateRequest
 from app.services.skill_sync import sync_skills_from_registry
 
@@ -41,16 +42,24 @@ async def create_skill(
 
     # Validate slug format (alphanumeric and hyphens only, non-empty)
     if not slug or not re.match(r"^[a-z0-9]+(?:-[a-z0-9]+)*$", slug):
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Slug must be non-empty and contain only lowercase alpha-numeric and hyphens",
+            content=ErrorDetail(
+                message="Slug must contain only lowercase letters, numbers and hyphens",
+                code=status.HTTP_400_BAD_REQUEST,
+                field="slug",
+            ).model_dump(),
         )
 
     existing = await db.execute(select(Skill).where(Skill.slug == slug))
     if existing.scalar_one_or_none():
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Skill slug already exists",
+            content=ErrorDetail(
+                message="Skill slug already exists",
+                code=status.HTTP_409_CONFLICT,
+                field="slug",
+            ).model_dump(),
         )
 
     skill = Skill(
@@ -67,12 +76,16 @@ async def create_skill(
     db.add(skill)
     try:
         await db.commit()
-    except IntegrityError as exc:
+    except IntegrityError:
         await db.rollback()
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Skill slug already exists",
-        ) from exc
+            content=ErrorDetail(
+                message="Skill slug already exists",
+                code=status.HTTP_409_CONFLICT,
+                field="slug",
+            ).model_dump(),
+        )
     await db.refresh(skill)
 
     return ApiResponse[SkillRead](
@@ -92,9 +105,13 @@ async def update_skill(
     skill = result.scalar_one_or_none()
 
     if skill is None:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Skill not found",
+            content=ErrorDetail(
+                message="Skill not found",
+                code=status.HTTP_404_NOT_FOUND,
+                field="slug",
+            ).model_dump(),
         )
 
     if body.name is not None:
@@ -133,9 +150,13 @@ async def delete_skill(
     skill = result.scalar_one_or_none()
 
     if skill is None:
-        raise HTTPException(
+        return JSONResponse(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Skill not found",
+            content=ErrorDetail(
+                message="Skill not found",
+                code=status.HTTP_404_NOT_FOUND,
+                field="slug",
+            ).model_dump(),
         )
 
     skill.is_active = False
