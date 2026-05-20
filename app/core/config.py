@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     GITHUB_OAUTH_ENABLED: bool = False
     OAUTH_LINK_TOKEN_EXPIRE_MINUTES: int = 30
 
+    GITHUB_TOKEN: str
+    GITHUB_ORG: str
+
     @model_validator(mode="after")
     def _validate_github_oauth_credentials(self) -> "Settings":
         if not self.GITHUB_OAUTH_ENABLED:
@@ -97,6 +100,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     LLM_PROVIDER: str = "gemini"
     GEMINI_API_KEY: str | None = None
+    GEMINI_MODEL_NAME: str = "gemini-3.5-flash"
     GEMINI_TIMEOUT_SECONDS: Annotated[int, Field(gt=0)] = 30
 
     @model_validator(mode="after")
