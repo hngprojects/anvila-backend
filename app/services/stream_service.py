@@ -6,7 +6,8 @@ from collections.abc import AsyncIterator
 
 import redis.asyncio as aioredis
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 from app.models.enums import PersonaStatus
@@ -58,16 +59,16 @@ async def _listen_redis(
     queue: asyncio.Queue,
     stop_event: asyncio.Event,
 ) -> None:
-    """
-    Subscribes to persona:{persona_id}:events and forwards
-    clarification events into the queue.
+    """Subscribe to persona:{id}:events and forward events to the queue.
 
-    Runs until stop_event is set (set by the DB poller when it
-    detects a terminal state or by the generator on client disconnect).
+    Handles:
+      clarification — forwarded as-is to the stream client.
+      error         — forwarded to the stream client, then stop_event is set
+                      so _poll_db exits on its next iteration (fast-path
+                      shutdown on Celery task failure).
 
-    If the prompt was clear and Celery never publishes to this channel,
-    this task just sits quietly until stop_event fires — it never blocks
-    the DB poller.
+    Runs until stop_event is set (driven by _poll_db on terminal DB state,
+    or by this task itself on a Redis error event).
     """
     channel = f"persona:{persona_id}:events"
     redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -97,7 +98,9 @@ async def _listen_redis(
                 logger.warning("stream: malformed Redis message for persona %s", persona_id)
                 continue
 
-            if payload.get("type") == "clarification":
+            msg_type = payload.get("type")
+
+            if msg_type == "clarification":
                 await queue.put(
                     _sse(
                         "clarification",
@@ -107,6 +110,22 @@ async def _listen_redis(
                         },
                     )
                 )
+
+            elif msg_type == "error":
+                # Celery task published a terminal error — surface it
+                # immediately and stop waiting.
+                await queue.put(
+                    _sse(
+                        "error",
+                        {
+                            "code": payload.get("code", "GENERATION_FAILED"),
+                            "message": payload.get("message", "Persona generation failed."),
+                        },
+                    )
+                )
+                # Signal _poll_db to stop on its next iteration.
+                stop_event.set()
+                break
 
     except asyncio.CancelledError:
         pass
@@ -123,82 +142,118 @@ async def _listen_redis(
 
 async def _poll_db(
     persona_id: uuid.UUID,
-    db: AsyncSession,
     queue: asyncio.Queue,
     stop_event: asyncio.Event,
 ) -> None:
-    """
-    Polls the persona row every POLL_INTERVAL seconds.
-    Emits file events as columns become non-null.
-    Emits skills event once PersonaSkill records exist.
-    Emits complete or error on terminal status, then sets stop_event.
+    """Poll the persona row on its own dedicated DB session.
 
-    This task drives the stream lifecycle. It is the one that
-    sets stop_event to signal the Redis listener to shut down.
+    Uses NullPool so it never competes with the request-scoped session for
+    a connection — avoids asyncpg "another operation is in progress" errors.
+
+    Emits:
+      file      — once per column, as soon as the column becomes non-null.
+      skills    — once, as soon as PersonaSkill rows exist.
+      complete  — when status == GENERATED (after flushing any remaining files).
+      error     — when status == FAILED (belt-and-suspenders; Celery task also
+                  publishes to Redis for faster delivery).
+
+    Sets stop_event on any terminal state, which causes _listen_redis to exit.
+    Always puts _DONE on the queue in its finally block so stream_generation
+    stops yielding.
     """
     sent_files: set[str] = set()
     skills_sent = False
 
+    engine = create_async_engine(str(settings.DATABASE_URL), poolclass=NullPool)
     try:
-        while not stop_event.is_set():
-            await asyncio.sleep(POLL_INTERVAL)
-            await db.refresh(persona := await db.get(Persona, persona_id))
+        async with AsyncSession(engine, expire_on_commit=False) as db:
+            while not stop_event.is_set():
+                await asyncio.sleep(POLL_INTERVAL)
 
-            # Emit any newly populated file columns
-            for col in FILE_COLUMNS:
-                if col not in sent_files:
-                    content = getattr(persona, col)
-                    if content:
-                        await queue.put(_sse("file", {"file": col, "content": content}))
-                        sent_files.add(col)
+                # Force a real DB round-trip on every cycle — never trust the
+                # identity-map cache for a long-running poll loop.
+                result = await db.execute(
+                    select(Persona)
+                    .where(Persona.id == persona_id)
+                    .execution_options(populate_existing=True)
+                )
+                persona = result.scalar_one_or_none()
 
-            # Emit skills once they appear
-            if not skills_sent:
-                skills = await _get_skills(persona_id, db)
-                if skills:
-                    await queue.put(_sse("skills", {"skills": skills}))
-                    skills_sent = True
+                if persona is None:
+                    await queue.put(
+                        _sse(
+                            "error",
+                            {
+                                "code": "NOT_FOUND",
+                                "message": "Persona no longer exists.",
+                            },
+                        )
+                    )
+                    stop_event.set()
+                    break
 
-            # Check terminal states
-            if persona.status == PersonaStatus.GENERATED:
-                # Flush any remaining files before complete
+                # Emit any newly populated file columns.
                 for col in FILE_COLUMNS:
                     if col not in sent_files:
                         content = getattr(persona, col)
                         if content:
                             await queue.put(_sse("file", {"file": col, "content": content}))
+                            sent_files.add(col)
 
+                # Emit skills once they appear.
                 if not skills_sent:
                     skills = await _get_skills(persona_id, db)
                     if skills:
                         await queue.put(_sse("skills", {"skills": skills}))
+                        skills_sent = True
 
-                await queue.put(
-                    _sse(
-                        "complete",
-                        {
-                            "persona_id": str(persona_id),
-                            "name": persona.name,
-                            "category": persona.category,
-                            "description": persona.description_summary,
-                        },
-                    )
-                )
-                stop_event.set()
-                break
+                # ── Terminal: success ──────────────────────────────────────
+                if persona.status == PersonaStatus.GENERATED:
+                    # Flush any files that arrived in this same poll cycle
+                    # but weren't caught above.
+                    for col in FILE_COLUMNS:
+                        if col not in sent_files:
+                            content = getattr(persona, col)
+                            if content:
+                                await queue.put(_sse("file", {"file": col, "content": content}))
+                                sent_files.add(col)
 
-            if persona.status == PersonaStatus.FAILED:
-                await queue.put(
-                    _sse(
-                        "error",
-                        {
-                            "code": persona.error_code or "GENERATION_FAILED",
-                            "message": "Persona generation failed.",
-                        },
+                    if not skills_sent:
+                        skills = await _get_skills(persona_id, db)
+                        if skills:
+                            await queue.put(_sse("skills", {"skills": skills}))
+
+                    await queue.put(
+                        _sse(
+                            "complete",
+                            {
+                                "persona_id": str(persona_id),
+                                "name": persona.name,
+                                "category": persona.category,
+                                "description": persona.description_summary,
+                            },
+                        )
                     )
-                )
-                stop_event.set()
-                break
+                    stop_event.set()
+                    break
+
+                # ── Terminal: failure ──────────────────────────────────────
+                if persona.status == PersonaStatus.FAILED:
+                    # Only emit here if stop_event isn't already set — if
+                    # _listen_redis already forwarded the Redis error event
+                    # and set stop_event, we skip the duplicate.
+                    if not stop_event.is_set():
+                        await queue.put(
+                            _sse(
+                                "error",
+                                {
+                                    "code": persona.error_code or "GENERATION_FAILED",
+                                    "message": "Persona generation failed.",
+                                },
+                            )
+                        )
+                    stop_event.set()
+                    break
 
     except asyncio.CancelledError:
         pass
@@ -207,6 +262,7 @@ async def _poll_db(
         stop_event.set()
     finally:
         await queue.put(_DONE)
+        await engine.dispose()
 
 
 async def stream_generation(
@@ -214,14 +270,16 @@ async def stream_generation(
     persona: Persona,
     db: AsyncSession,
 ) -> AsyncIterator[str]:
-    """
-    Main entry point called by the endpoint.
-    Handles already-terminal states immediately, otherwise
-    starts the concurrent Redis listener + DB poller.
+    """Main entry point called by the stream endpoint.
 
-    Yields SSE-formatted strings.
-    """
+    Handles already-terminal states immediately (no background tasks needed).
+    For in-progress personas, starts _listen_redis and _poll_db concurrently.
 
+    The `db` parameter is the request-scoped session and is only used here
+    for the already-terminal fast-path reads. _poll_db opens its own session
+    with NullPool to avoid concurrent-use errors.
+    """
+    # ── Fast-path: already done ────────────────────────────────────────────
     if persona.status == PersonaStatus.GENERATED:
         for col in FILE_COLUMNS:
             content = getattr(persona, col)
@@ -261,7 +319,7 @@ async def stream_generation(
         name=f"redis-listener-{persona_id}",
     )
     db_task = asyncio.create_task(
-        _poll_db(persona_id, db, queue, stop_event),
+        _poll_db(persona_id, queue, stop_event),
         name=f"db-poller-{persona_id}",
     )
 
@@ -270,8 +328,7 @@ async def stream_generation(
             item = await queue.get()
             if item is _DONE:
                 break
-
-            yield item
+            yield item  # type: ignore[misc]
 
     except asyncio.CancelledError:
         pass
@@ -279,5 +336,4 @@ async def stream_generation(
         stop_event.set()
         redis_task.cancel()
         db_task.cancel()
-
         await asyncio.gather(redis_task, db_task, return_exceptions=True)
