@@ -23,16 +23,24 @@ async def match_skills(
     db: AsyncSession,
 ) -> list[Skill]:
     """Resolve suggested skill slugs into 2-6 Skill ORM objects."""
+
+    normalized_slugs = _normalize_slugs(suggested_slugs, limit=6)
+
+    if not normalized_slugs:
+        return await _get_seeded_skills(
+            db,
+            category=category,
+            limit=2,
+            exclude_slugs=set(),
+        )
+
+    local_skills = await _get_local_skills_by_slugs(normalized_slugs, db)
+
     resolved: list[Skill] = []
     seen_slugs: set[str] = set()
 
-    for raw_slug in suggested_slugs[:6]:
-        slug = raw_slug.strip().lower()
-
-        if not slug or slug in seen_slugs:
-            continue
-
-        skill = await _get_local_skill_by_slug(slug, db)
+    for slug in normalized_slugs:
+        skill = local_skills.get(slug)
 
         if skill is None:
             skill = await _fetch_openclaw_skill(slug, category, db)
@@ -53,17 +61,6 @@ async def match_skills(
     return resolved[:6]
 
 
-async def _get_local_skill_by_slug(slug: str, db: AsyncSession) -> Skill | None:
-    """Return an active locally skill by slug."""
-    result = await db.execute(
-        select(Skill).where(
-            Skill.slug == slug,
-            Skill.is_active.is_(True),
-        )
-    )
-    return result.scalar_one_or_none()
-
-
 async def _fetch_openclaw_skill(
     query: str,
     category: str,
@@ -81,12 +78,18 @@ async def _fetch_openclaw_skill(
     if not skill_id:
         return None
 
-    detail = await fetch_openclaw_skill(skill_id)
+    try:
+        detail = await fetch_openclaw_skill(skill_id)
+    except Exception as exc:
+        logger.warning("OpenClaw detail fetch failed for skill %s: %s", skill_id, exc)
+        detail = None
 
-    if detail is None:
-        detail = item
-
-    return await _upsert_openclaw_skill(item, detail, category, db)
+    return await _upsert_openclaw_skill(
+        item=item,
+        detail=detail or item,
+        category=category,
+        db=db,
+    )
 
 
 async def _upsert_openclaw_skill(
@@ -112,9 +115,16 @@ async def _upsert_openclaw_skill(
     if not slug:
         return None
 
-    content = await fetch_openclaw_skill_markdown(item.get("id") or item.get("slug") or "")
-
-    skill_ref = item.get("id") or item.get("slug") or ""
+    skill_ref = (
+        detail.get("id")
+        or detail.get("slug")
+        or item.get("id")
+        or item.get("slug")
+        or detail.get("name")
+        or item.get("name")
+        or ""
+    )
+    content = await fetch_openclaw_skill_markdown(skill_ref) if skill_ref else ""
 
     values = {
         "name": (
@@ -212,3 +222,41 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _normalize_slugs(raw_slugs: list[str], limit: int = 6) -> list[str]:
+    """Normalize and deduplicate suggested slugs while preserving order."""
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for raw_slug in raw_slugs:
+        slug = raw_slug.strip().lower()
+
+        if not slug or slug in seen:
+            continue
+
+        normalized.append(slug)
+        seen.add(slug)
+
+        if len(normalized) >= limit:
+            break
+
+    return normalized
+
+
+async def _get_local_skills_by_slugs(
+    slugs: list[str],
+    db: AsyncSession,
+) -> dict[str, Skill]:
+    """Fetch all active local skills for given slugs in one query."""
+    if not slugs:
+        return {}
+
+    result = await db.execute(
+        select(Skill).where(
+            Skill.slug.in_(slugs),
+            Skill.is_active.is_(True),
+        )
+    )
+
+    return {skill.slug: skill for skill in result.scalars().all()}

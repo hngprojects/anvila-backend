@@ -35,7 +35,9 @@ def upgrade() -> None:
     )
 
     if duplicate_slugs:
-        details = ", ".join(f"{row.slug!r} ({row.count})" for row in duplicate_slugs[:20])
+        details = ", ".join(
+            f"{row._mapping['slug']!r} ({row._mapping['count']})" for row in duplicate_slugs[:20]
+        )
         raise RuntimeError(
             "Cannot create unique index ix_skills_slug because duplicate "
             f"skills.slug values exist: {details}. "

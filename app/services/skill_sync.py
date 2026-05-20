@@ -12,7 +12,6 @@ from app.services.openclaw_client import (
     fetch_openclaw_skill_markdown,
     list_openclaw_skills,
 )
-from app.services.skill_matcher import _safe_int
 
 logger = logging.getLogger(__name__)
 OPENCLAW_FETCH_CONCURRENCY = 10
@@ -104,15 +103,12 @@ async def _fetch_all_skill_markdowns(
 
             try:
                 content = await fetch_openclaw_skill_markdown(skill_ref)
-                logger.debug(
-                    "Fetched OpenClaw markdown for %s in %.2fs",
-                    skill_ref,
-                )
+
                 return item, content or ""
 
             except Exception as exc:
                 logger.warning(
-                    "Failed fetching OpenClaw markdown for %s after %.2fs: %s",
+                    "Failed fetching OpenClaw markdown",
                     skill_ref,
                     exc,
                 )
@@ -148,3 +144,10 @@ def _install_count(item: dict[str, Any], fallback: int | None = 0) -> int:
     return _safe_int(
         (item.get("stats") or {}).get("downloads") or item.get("install_count") or fallback or 0
     )
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default

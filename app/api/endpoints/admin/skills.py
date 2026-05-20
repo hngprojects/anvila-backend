@@ -43,7 +43,7 @@ async def create_skill(
     if not slug or not re.match(r"^[a-z0-9]+(?:-[a-z0-9]+)*$", slug):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Slug must be non-empty and contain only lowercase alpha-numeric",
+            detail="Slug must be non-empty and contain only lowercase alpha-numeric and hyphens",
         )
 
     existing = await db.execute(select(Skill).where(Skill.slug == slug))
