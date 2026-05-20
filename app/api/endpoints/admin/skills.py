@@ -76,16 +76,22 @@ async def create_skill(
     db.add(skill)
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
-        return JSONResponse(
-            status_code=status.HTTP_409_CONFLICT,
-            content=ErrorDetail(
-                message="Skill slug already exists",
-                code=status.HTTP_409_CONFLICT,
-                field="slug",
-            ).model_dump(),
-        )
+        # Check if this is a unique constraint violation on slug
+        error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+        if 'slug' in error_msg.lower() and 'unique' in error_msg.lower():
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content=ErrorDetail(
+                    message="Skill slug already exists",
+                    code=status.HTTP_409_CONFLICT,
+                    field="slug",
+                ).model_dump(),
+            )
+        # Re-raise for unexpected integrity errors
+        raise
+
     await db.refresh(skill)
 
     return ApiResponse[SkillRead](
