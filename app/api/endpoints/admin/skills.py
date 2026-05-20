@@ -36,7 +36,7 @@ async def create_skill(
     body: SkillCreateRequest,
     db: DBSession,
     user: AdminUser,
-) -> ApiResponse[SkillRead]:
+) -> ApiResponse[SkillRead] | JSONResponse:
     """Create a manually seeded Anvila skill."""
     slug = body.slug.strip().lower()
 
@@ -105,7 +105,7 @@ async def update_skill(
     body: SkillUpdateRequest,
     db: DBSession,
     user: AdminUser,
-) -> ApiResponse[SkillRead]:
+) -> ApiResponse[SkillRead] | JSONResponse:
     """Update an existing skill. Slug is immutable."""
     result = await db.execute(select(Skill).where(Skill.slug == slug))
     skill = result.scalar_one_or_none()
@@ -150,7 +150,7 @@ async def delete_skill(
     slug: str,
     db: DBSession,
     user: AdminUser,
-) -> None:
+) -> None | JSONResponse:
     """Soft-delete a skill by setting is_active to false."""
     result = await db.execute(select(Skill).where(Skill.slug == slug))
     skill = result.scalar_one_or_none()

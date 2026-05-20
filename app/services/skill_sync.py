@@ -44,7 +44,6 @@ async def sync_skills_from_registry(category: str | None = None, limit=50) -> di
                 continue
 
             skill = existing_by_slug.get(slug)
-            skill_ref = _skill_ref(item)
 
             if skill is None:
                 skill_ref = item.get("id") or item.get("slug") or ""
