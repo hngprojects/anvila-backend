@@ -1,5 +1,4 @@
 import asyncio
-from typing import ClassVar
 
 import google.generativeai as genai
 
@@ -9,11 +8,9 @@ from app.services.llm.types import LLMResponse
 
 
 class GeminiAdapter(LLMAdapter):
-    SYSTEM_PROMPT: ClassVar[str] = ""
-
     def __init__(self) -> None:
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        self._model_name: str = "gemini-2.0-flash"
+        self._model_name: str = settings.GEMINI_MODEL_NAME
         self._model = genai.GenerativeModel(self._model_name)
 
     def build_prompt(self, prompt: str) -> str:
