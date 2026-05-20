@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -60,13 +61,19 @@ async def explore(
     )
     categories = sorted(c for c in all_cats_result.scalars().all() if c)
 
+    persona_ids = [p.id for p in personas]
+    skill_map: dict = defaultdict(list)
+    if persona_ids:
+        skills_result = await db.execute(
+            select(PersonaSkill.persona_id, Skill.name)
+            .join(Skill, PersonaSkill.skill_id == Skill.id)
+            .where(PersonaSkill.persona_id.in_(persona_ids))
+        )
+        for persona_id, skill_name in skills_result.all():
+            skill_map[persona_id].append(skill_name)
+
     result_personas = []
     for persona in personas:
-        skills_result = await db.execute(
-            select(Skill.name)
-            .join(PersonaSkill, PersonaSkill.skill_id == Skill.id)
-            .where(PersonaSkill.persona_id == persona.id)
-        )
         result_personas.append(
             ExplorePersona(
                 id=persona.id,
@@ -75,7 +82,7 @@ async def explore(
                 category=persona.category,
                 github_repo_url=persona.github_repo_url,
                 published_at=persona.published_at,
-                skill_names=list(skills_result.scalars().all()),
+                skill_names=skill_map.get(persona.id, []),
             )
         )
 

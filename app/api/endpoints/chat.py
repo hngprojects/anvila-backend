@@ -3,7 +3,6 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUser, CursorPaginationParams, DBSession
 from app.core.paginator import CursorMeta, cursor_paginate
@@ -12,34 +11,9 @@ from app.models.conversation_message import ConversationMessage
 from app.models.persona import Persona
 from app.schemas.chat import MessageOut, SessionSummary
 from app.schemas.shared import ApiResponse
+from app.services.chat_service import build_session_summaries
 
 router = APIRouter(tags=["chat"])
-
-
-async def _session_to_summary(session: ChatSession, db: AsyncSession):
-    """Build a SessionSummary from a ChatSession row."""
-    persona = await db.get(Persona, session.persona_id)
-
-    # Get the last message for preview
-    result = await db.execute(
-        select(ConversationMessage)
-        .where(
-            ConversationMessage.session_id == session.id,
-        )
-        .order_by(ConversationMessage.created_at.desc())
-        .limit(1)
-    )
-    last_msg = result.scalar_one_or_none()
-    preview = last_msg.content[:100] if last_msg else None
-
-    return SessionSummary(
-        session_id=session.id,
-        persona_id=session.persona_id,
-        persona_name=persona.name if persona else None,
-        last_message_preview=preview,
-        last_message_at=session.last_message_at,
-        status=session.status,
-    )
 
 
 @router.get("/chat/sessions", response_model=ApiResponse[list[SessionSummary]])
@@ -64,7 +38,7 @@ async def list_all_sessions(
     sessions, meta = await cursor_paginate(
         db, query, params, ChatSession, "last_message_at", descending=True
     )
-    summaries = [await _session_to_summary(s, db) for s in sessions]
+    summaries = await build_session_summaries(db, sessions)
 
     return ApiResponse[list[SessionSummary]](
         message="Chat sessions retrieved successfully",

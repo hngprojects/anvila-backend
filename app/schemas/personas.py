@@ -97,7 +97,7 @@ class PersonaStatusResponse(BaseModel):
 
 
 class PublishPersonaResponse(BaseModel):
-    persona_id: str
+    persona_id: uuid.UUID
     status: str
     published_at: datetime | None
     github_repo_url: str | None

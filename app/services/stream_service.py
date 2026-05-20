@@ -168,8 +168,6 @@ async def _poll_db(
     try:
         async with AsyncSession(engine, expire_on_commit=False) as db:
             while not stop_event.is_set():
-                await asyncio.sleep(POLL_INTERVAL)
-
                 # Force a real DB round-trip on every cycle — never trust the
                 # identity-map cache for a long-running poll loop.
                 result = await db.execute(
@@ -254,6 +252,7 @@ async def _poll_db(
                         )
                     stop_event.set()
                     break
+                await asyncio.sleep(POLL_INTERVAL)
 
     except asyncio.CancelledError:
         pass

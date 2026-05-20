@@ -256,14 +256,14 @@ async def list_personas(
         Persona.user_id == user.id,
         Persona.deleted_at == None,  # noqa
     ]
-    if status:
+    if status and status in PersonaStatus:
         filters.append(Persona.status == status)
 
     query = select(Persona).where(and_(*filters)).order_by(Persona.created_at.desc())
     rows, meta = await paginate(db, query, params)
     return ApiResponse[list[PersonaSummary]](
         message="Personas retrieved.",
-        data=rows,
+        data=[PersonaSummary.model_validate(r) for r in rows],
         meta=meta.model_dump(),
     )
 
@@ -361,7 +361,7 @@ async def get_persona_status(
     """
     persona = await db.get(Persona, persona_id)
 
-    if not persona or persona.user_id != user.id:
+    if not persona or persona.user_id != user.id or persona.deleted_at is not None:
         raise HTTPException(status_code=404, detail="Persona not found")
 
     files_completed = [col for col in FILE_COLUMNS if getattr(persona, col) is not None]
@@ -471,7 +471,7 @@ async def publish_persona_to_github(
 
     for filename, content in files.items():
         await upsert_file(
-            slug=persona.slug,
+            slug=persona.name,
             path=filename,
             content=content,
             message=f"chore: publish {filename}",
@@ -489,7 +489,7 @@ async def publish_persona_to_github(
     await db.refresh(persona)
 
     data = PublishPersonaResponse(
-        persona_id=str(persona.id),
+        persona_id=persona.id,
         status=persona.status,
         published_at=persona.published_at,
         github_repo_url=persona.github_repo_url,

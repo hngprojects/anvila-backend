@@ -10,7 +10,7 @@ class ExplorePersona(BaseModel):
     id: uuid.UUID
     name: str
     description_summary: str
-    category: str
+    category: PersonaCategory
     github_repo_url: str | None
     published_at: datetime | None
     skill_names: list[str]

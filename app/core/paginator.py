@@ -4,7 +4,7 @@ from typing import Annotated, Any
 
 from fastapi import Query
 from pydantic import BaseModel
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 

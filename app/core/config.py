@@ -71,8 +71,8 @@ class Settings(BaseSettings):
     GITHUB_OAUTH_ENABLED: bool = False
     OAUTH_LINK_TOKEN_EXPIRE_MINUTES: int = 30
 
-    GITHUB_TOKEN: str
-    GITHUB_ORG: str
+    GITHUB_TOKEN: str | None = None
+    GITHUB_ORG: str | None = None
 
     @model_validator(mode="after")
     def _validate_github_oauth_credentials(self) -> "Settings":
