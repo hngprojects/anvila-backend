@@ -167,11 +167,7 @@ async def fetch_github_verified_emails(
 
 def resolve_primary_verified_email(emails: list[dict[str, Any]]) -> str | None:
     primary_verified = next(
-        (
-            entry.get("email")
-            for entry in emails
-            if entry.get("primary") and entry.get("verified")
-        ),
+        (entry.get("email") for entry in emails if entry.get("primary") and entry.get("verified")),
         None,
     )
     if primary_verified:
@@ -302,24 +298,21 @@ async def process_github_callback(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is disabled",
             )
-        # TC-036 (D): proof-of-control required before linking. Do NOT log in here.
-        link_token = await mint_link_token(
-            db,
-            user=existing_by_email,
-            provider=_GITHUB_PROVIDER,
-            provider_subject=subject,
+        existing_by_email.github_subject = subject
+        existing_by_email.github_username = str(profile["login"]) if profile.get("login") else None
+        await db.flush()
+        access_token, raw_refresh = await _mint_session_tokens(
+            db, user=existing_by_email, request=request
         )
         _logger.info(
-            "event=auth.oauth.github.link_pending outcome=link_required "
-            "user_id=%s email_hash=%s",
+            "event=auth.oauth.github.callback.success outcome=auto_linked user_id=%s email_hash=%s",
             existing_by_email.id,
             email_hash,
         )
-        return LinkConfirmationRequired(
-            email=verified_email,
-            link_token=link_token,
-            user_id=existing_by_email.id,
-            github_subject=subject,
+        return LoginCompleted(
+            access_token=access_token,
+            raw_refresh=raw_refresh,
+            user=existing_by_email,
         )
 
     new_user = User(
@@ -391,12 +384,9 @@ async def process_github_callback(
             github_subject=subject,
         )
 
-    access_token, raw_refresh = await _mint_session_tokens(
-        db, user=new_user, request=request
-    )
+    access_token, raw_refresh = await _mint_session_tokens(db, user=new_user, request=request)
     _logger.info(
-        "event=auth.oauth.github.callback.success outcome=new_user "
-        "user_id=%s email_hash=%s",
+        "event=auth.oauth.github.callback.success outcome=new_user user_id=%s email_hash=%s",
         new_user.id,
         email_hash,
     )
