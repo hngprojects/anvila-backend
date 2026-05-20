@@ -3,51 +3,41 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.chat_session import ChatSession
 
 
+def _format_answers(answers: list[dict]) -> str:
+    return "\n".join(f"Q: {a['id']}\nA: {a['answer']}" for a in answers)
+
+
 class ContextManager:
     async def compress(
         self,
         session: ChatSession,
-        new_answers: list[dict],  # [{"id": str, "answer": str}]
+        new_answers: list[dict],
         db: AsyncSession,
     ) -> str:
-        # Produce a compact intent summary from the existing context
-        # and the latest answers.
-        #
-        # Logic:
-        #   - Read session.compressed_context (may be None on first round)
-        #   - Format new_answers as Q&A pairs:
-        #       "Q: {question_id}\nA: {answer}"
-        #   - If previous context exists:
-        #       append the new Q&A block to it
-        #   - If no previous context:
-        #       start fresh with the new Q&A block
-        #   - Save the new summary to session.compressed_context in DB
-        #   - Commit the DB session
-        #
-        # Returns the new compressed_context string.
-        # This string is what gets sent to the LLM on the next call —
-        # not the full message history.
-        raise NotImplementedError
+        block = _format_answers(new_answers)
+        if session.compressed_context:
+            updated = f"{session.compressed_context}\n\n{block}"
+        else:
+            updated = f"User intent:\n{block}"
+
+        session.compressed_context = updated
+        await db.commit()
+        return updated
 
     def build_followup_prompt(
         self,
         session: ChatSession,
-        answers: list[dict],  # [{"id": str, "answer": str}]
+        answers: list[dict],
         system_prompt: str,
     ) -> str:
-        # Build the complete prompt string for a follow-up LLM call.
-        #
-        # Structure (in order):
-        #   1. system_prompt  (the unified generation system prompt)
-        #   2. A separator line
-        #   3. "CONTEXT SO FAR:\n" + session.compressed_context
-        #   4. A separator line
-        #   5. "LATEST ANSWERS:\n" + formatted answers
-        #   6. "Continue generation or ask further questions."
-        #
-        # Does NOT include full message history.
-        # Does NOT call the LLM — pure string construction.
-        #
-        # Returns the complete prompt string ready to pass to
-        # LLMAdapter.generate() as the `prompt` argument.
-        raise NotImplementedError
+        separator = "---"
+        context = session.compressed_context or ""
+        answers_block = _format_answers(answers) if answers else ""
+        return (
+            f"{system_prompt}\n"
+            f"{separator}\n"
+            f"CONTEXT SO FAR:\n{context}\n"
+            f"{separator}\n"
+            f"LATEST ANSWERS:\n{answers_block}\n"
+            f"Continue generation or ask further questions."
+        )
