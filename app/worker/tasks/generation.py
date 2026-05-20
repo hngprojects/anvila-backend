@@ -170,6 +170,11 @@ async def _run_generation(
                     persona.error_code = "INVALID_LLM_RESPONSE"
                     await db.commit()
                     raise _NoRetry("invalid LLM JSON") from exc
+                if not isinstance(parsed, dict):
+                    persona.status = PersonaStatus.FAILED
+                    persona.error_code = "INVALID_LLM_RESPONSE"
+                    await db.commit()
+                    raise _NoRetry("invalid LLM JSON shape")
 
                 kind = parsed.get("type")
                 if kind == "generation":

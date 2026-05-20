@@ -155,6 +155,24 @@ async def test_invalid_json_marks_failed_with_invalid_llm_response(
     assert persona.error_code == "INVALID_LLM_RESPONSE"
 
 
+async def test_valid_json_non_object_marks_failed_with_invalid_llm_response(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    persona, session = persona_and_session
+    _patch_redis(mocker)
+    fake_adapter.generate.return_value = _llm_response("[]")
+
+    with pytest.raises(_NoRetry):
+        await _run_generation(str(persona.id), str(session.id), "<USER_INPUT>x</USER_INPUT>", None)
+
+    await db_session.refresh(persona)
+    assert persona.status == PersonaStatus.FAILED
+    assert persona.error_code == "INVALID_LLM_RESPONSE"
+
+
 async def test_match_skills_not_implemented_is_swallowed(
     mocker,
     db_session: AsyncSession,
