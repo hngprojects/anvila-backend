@@ -328,6 +328,7 @@ async def github_start(response: Response) -> Response:
 @_github_router.get(
     "/github/callback",
     summary="Handle GitHub OAuth callback",
+    response_model=None,
 )
 async def github_callback(
     request: Request,
@@ -339,7 +340,7 @@ async def github_callback(
     error: str | None = Query(default=None),
     error_description: str | None = Query(default=None),
     state_cookie: str | None = Cookie(default=None, alias=OAUTH_STATE_COOKIE),
-) -> ApiResponse[LoginData] | ApiResponse[LinkConfirmationData]:
+) -> RedirectResponse | ApiResponse[LinkConfirmationData]:
     try:
         if error:
             raise HTTPException(
@@ -364,18 +365,13 @@ async def github_callback(
         if isinstance(outcome, LoginCompleted):
             await db.commit()
             await db.refresh(outcome.user)
-            set_refresh_token_cookie(response, outcome.raw_refresh)
-            clear_oauth_state_cookie(response)
-            return ApiResponse[LoginData](
-                message="Login successful.",
-                data=LoginData(
-                    user=UserResponse.model_validate(outcome.user),
-                    tokens=TokenResponse(
-                        access_token=outcome.access_token,
-                        refresh_token=outcome.raw_refresh,
-                    ),
-                ),
+            redirect = await redirect_with_ott(
+                outcome.access_token,
+                outcome.raw_refresh,
+                UserResponse.model_validate(outcome.user),
             )
+            set_refresh_token_cookie(redirect, outcome.raw_refresh)
+            return redirect
 
         # LinkConfirmationRequired branch — persist the link-token row, send email,
         # but never log the user in or set a refresh cookie.
