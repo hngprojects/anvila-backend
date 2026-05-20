@@ -111,7 +111,7 @@ async def _run_generation(
     from app.core.config import settings
     from app.db.session import AsyncSessionLocal
     from app.models.chat_session import ChatSession
-    from app.models.enums import PersonaStatus, SessionStatus
+    from app.models.enums import PersonaCategory, PersonaStatus, SessionStatus
     from app.models.persona import Persona
     from app.models.persona_skill import PersonaSkill
     from app.models.user import User
@@ -264,6 +264,8 @@ async def _run_generation(
             assert parsed is not None
             try:
                 files = parsed["files"]
+                if parsed["category"] not in {c.value for c in PersonaCategory}:
+                    raise ValueError(f"invalid category: {parsed['category']!r}")
                 persona.name = parsed["persona_name"]
                 persona.category = parsed["category"]
                 persona.description_summary = parsed["short_description"]
@@ -271,7 +273,7 @@ async def _run_generation(
                     setattr(persona, col, files[col])
                 persona.status = PersonaStatus.GENERATING
                 await db.commit()
-            except (KeyError, TypeError) as exc:
+            except (KeyError, TypeError, ValueError) as exc:
                 persona.status = PersonaStatus.FAILED
                 persona.error_code = "INVALID_LLM_RESPONSE"
                 await db.commit()

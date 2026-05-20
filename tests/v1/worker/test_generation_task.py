@@ -447,3 +447,23 @@ async def test_generation_missing_required_field_marks_failed(
     await db_session.refresh(persona)
     assert persona.status == PersonaStatus.FAILED
     assert persona.error_code == "INVALID_LLM_RESPONSE"
+
+
+async def test_invalid_category_marks_failed_with_invalid_llm_response(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    persona, session = persona_and_session
+    _patch_redis(mocker)
+    payload = _generation_payload()
+    payload["category"] = "unicorn"
+    fake_adapter.generate.return_value = _llm_response(json.dumps(payload))
+
+    with pytest.raises(_NoRetry):
+        await _run_generation(str(persona.id), str(session.id), "<USER_INPUT>x</USER_INPUT>", None)
+
+    await db_session.refresh(persona)
+    assert persona.status == PersonaStatus.FAILED
+    assert persona.error_code == "INVALID_LLM_RESPONSE"
