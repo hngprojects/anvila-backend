@@ -1,12 +1,9 @@
-import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from pydantic import BaseModel
 from redis.asyncio import Redis
 from sqlalchemy import and_, case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +11,7 @@ from starlette.responses import StreamingResponse
 
 from app.api.deps import CanGenerate, CurrentUser, DBSession
 from app.core.config import settings
-from app.core.paginator import PageParams, PaginatedMeta, paginate
+from app.core.paginator import PageParams, paginate
 from app.core.security import decode_token
 from app.models.chat_session import ChatSession
 from app.models.conversation_message import ConversationMessage
@@ -32,16 +29,23 @@ from app.schemas.personas import (
     ClarifyRequest,
     ClarifyResponse,
     GenerateResponse,
+    PersonaDetail,
+    PersonaStatusResponse,
+    PersonaSummary,
+    PublishPersonaResponse,
+    SkillOut,
 )
 from app.schemas.shared import ApiResponse
 from app.services.auth import get_user_by_id
 from app.services.context_manager import ContextManager
 from app.services.file_extractor import extract_text
 from app.services.prompt_sanitizer import PromptSanitizer
+from app.services.publish_service import create_or_get_repo, upsert_file
+from app.services.stream_service import stream_generation
 from app.worker.tasks.generation import generate_persona
 
 MAX_CLARIFICATION_ROUNDS = 5
-
+POLL_INTERVAL = 1.5
 router = APIRouter(prefix="/personas", tags=["personas"])
 
 
@@ -105,7 +109,7 @@ async def generate(
     await db.commit()
 
     try:
-        task = generate_persona.delay(
+        task = generate_persona.delay(  # type: ignore
             str(persona.id),
             str(session.id),
             sanitized_prompt,
@@ -225,55 +229,6 @@ async def clarify(
     )
 
 
-router = APIRouter(prefix="/personas", tags=["personas"])
-POLL_INTERVAL = 1.5
-
-
-class SkillOut(BaseModel):
-    slug: str
-    name: str
-    description: str
-    tags: list[str]
-
-
-class PersonaSummary(BaseModel):
-    id: uuid.UUID
-    name: str
-    description_summary: str
-    category: str
-    status: str
-    visibility: str
-    github_repo_url: str | None
-    created_at: datetime
-    published_at: datetime | None
-
-
-class PersonaListResponse(BaseModel):
-    personas: list[PersonaSummary]
-    meta: PaginatedMeta
-
-
-class PersonaDetail(BaseModel):
-    id: uuid.UUID
-    name: str
-    description_summary: str
-    category: str
-    status: str
-    visibility: str
-    github_repo_url: str | None
-    github_clone_url: str | None
-    github_zip_url: str | None
-    published_at: datetime | None
-    created_at: datetime
-    identity_md: str | None
-    soul_md: str | None
-    dna_md: str | None
-    overview_md: str | None
-    heartbeat_md: str | None
-    readme_md: str | None
-    skills: list[SkillOut]
-
-
 async def _get_skills(persona_id: uuid.UUID, db: AsyncSession) -> list[SkillOut]:
     result = await db.execute(
         select(Skill)
@@ -286,7 +241,7 @@ async def _get_skills(persona_id: uuid.UUID, db: AsyncSession) -> list[SkillOut]
     ]
 
 
-@router.get("", response_model=PersonaListResponse)
+@router.get("", response_model=ApiResponse[list[PersonaSummary]])
 async def list_personas(
     user: CurrentUser,
     db: DBSession,
@@ -306,27 +261,14 @@ async def list_personas(
 
     query = select(Persona).where(and_(*filters)).order_by(Persona.created_at.desc())
     rows, meta = await paginate(db, query, params)
-
-    return PersonaListResponse(
-        personas=[
-            PersonaSummary(
-                id=p.id,
-                name=p.name,
-                description_summary=p.description_summary,
-                category=p.category,
-                status=p.status,
-                visibility=p.visibility,
-                github_repo_url=p.github_repo_url,
-                created_at=p.created_at,
-                published_at=p.published_at,
-            )
-            for p in rows.all()
-        ],
-        meta=meta,
+    return ApiResponse[list[PersonaSummary]](
+        message="Personas retrieved.",
+        data=rows,
+        meta=meta.model_dump(),
     )
 
 
-@router.get("/{persona_id}", response_model=PersonaDetail)
+@router.get("/{persona_id}", response_model=ApiResponse[PersonaDetail])
 async def get_persona(
     persona_id: uuid.UUID,
     user: CurrentUser,
@@ -342,7 +284,7 @@ async def get_persona(
 
     skills = await _get_skills(persona_id, db)
 
-    return PersonaDetail(
+    data = PersonaDetail(
         id=persona.id,
         name=persona.name,
         description_summary=persona.description_summary,
@@ -362,6 +304,7 @@ async def get_persona(
         readme_md=persona.readme_md,
         skills=skills,
     )
+    return ApiResponse[PersonaDetail](message="Persona retrieved.", data=data)
 
 
 @router.delete("/{persona_id}", status_code=204)
@@ -404,19 +347,7 @@ FILE_COLUMNS = [
 ]
 
 
-class PersonaStatusResponse(BaseModel):
-    persona_id: uuid.UUID
-    status: str
-    files_completed: list[str]
-    files_total: int
-    skills_matched: bool
-    name: str | None
-    category: str | None
-    description: str | None
-    error_code: str | None
-
-
-@router.get("/{persona_id}/status", response_model=PersonaStatusResponse)
+@router.get("/{persona_id}/status", response_model=ApiResponse[PersonaStatusResponse])
 async def get_persona_status(
     persona_id: uuid.UUID,
     user: CurrentUser,
@@ -440,7 +371,7 @@ async def get_persona_status(
     )
     skills_matched = result.scalar_one_or_none() is not None
 
-    return PersonaStatusResponse(
+    data = PersonaStatusResponse(
         persona_id=persona_id,
         status=persona.status,
         files_completed=files_completed,
@@ -451,52 +382,27 @@ async def get_persona_status(
         description=persona.description_summary,
         error_code=persona.error_code,
     )
-
-
-def _sse(event: str, data: dict) -> str:
-    """Format a server-sent event string."""
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
-
-
-async def _get_persona_skills(persona_id: uuid.UUID, db: AsyncSession) -> list[dict]:
-    """Fetch full skill objects attached to a persona."""
-    result = await db.execute(
-        select(Skill)
-        .join(PersonaSkill, PersonaSkill.skill_id == Skill.id)
-        .where(PersonaSkill.persona_id == persona_id)
-    )
-    skills = result.scalars().all()
-    return [
-        {
-            "slug": s.slug,
-            "name": s.name,
-            "description": s.description,
-            "tags": s.tags or [],
-        }
-        for s in skills
-    ]
+    return ApiResponse[PersonaStatusResponse](message="Status retrieved.", data=data)
 
 
 @router.get("/{persona_id}/stream")
 async def stream_persona(
     persona_id: uuid.UUID,
     db: DBSession,
-    # JWT passed as query param because EventSource does not support headers
-    token: str = Query(..., description="JWT access token"),
+    token: Annotated[str, Query(description="JWT access token")],
 ):
     """
     SSE stream for persona generation progress.
+    JWT is passed as a query param because EventSource does not support headers.
 
-    Events emitted:
-      clarification — LLM needs more info. Payload: {round, questions}
-      file          — A file was saved. Payload: {file: "identity_md", content: "..."}
-      skills        — Skills resolved. Payload: {skills: [...]}
-      complete      — Generation done. Payload: {persona_id, name, category, description}
-      error         — Terminal failure. Payload: {code, message}
-
-    The stream stays open through multiple clarification rounds.
-    It closes automatically on complete or error.
+    Events:
+      clarification — {round, questions}
+      file          — {file: "identity_md", content: "..."}
+      skills        — {skills: [...]}
+      complete      — {persona_id, name, category, description}
+      error         — {code, message}
     """
+    # Validate token
     payload = decode_token(token, expected_purpose="access")
     try:
         user_id = uuid.UUID(payload["sub"])
@@ -516,129 +422,79 @@ async def stream_persona(
         )
 
     persona = await db.get(Persona, persona_id)
-    if not persona:
-        raise HTTPException(status_code=404, detail="Persona not found")
-
-    if persona.user_id != user_id:
-        raise HTTPException(status_code=404, detail="Persona not found")
-
-    async def event_generator():
-        sent_files: set[str] = set()
-        skills_sent = False
-
-        # Handle already-terminal states on connect.
-        # This covers the case where the user refreshes mid-generation
-        # or reconnects after navigating away.
-        if persona.status == PersonaStatus.GENERATED:
-            for col in FILE_COLUMNS:
-                content = getattr(persona, col)
-                if content:
-                    yield _sse("file", {"file": col, "content": content})
-
-            # Send skills
-            skills = await _get_persona_skills(persona_id, db)
-            if skills:
-                yield _sse("skills", {"skills": skills})
-
-            yield _sse(
-                "complete",
-                {
-                    "persona_id": str(persona_id),
-                    "name": persona.name,
-                    "category": persona.category,
-                    "description": persona.description_summary,
-                },
-            )
-            return
-
-        if persona.status == PersonaStatus.FAILED:
-            yield _sse(
-                "error",
-                {
-                    "code": persona.error_code or "GENERATION_FAILED",
-                    "message": "Persona generation failed.",
-                },
-            )
-            return
-
-        redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-        pubsub = redis_client.pubsub()
-        channel = f"persona:{persona_id}:events"
-        await pubsub.subscribe(channel)
-
-        try:
-            while True:
-                # ── Check Redis for clarification events ──────────────────
-                # Non-blocking get — check if Celery published anything
-                message = await pubsub.get_message(ignore_subscribe_messages=True)
-                if message and message["type"] == "message":
-                    try:
-                        payload = json.loads(message["data"])
-                        if payload.get("type") == "clarification":
-                            yield _sse(
-                                "clarification",
-                                {
-                                    "round": payload["round"],
-                                    "questions": payload["questions"],
-                                },
-                            )
-                    except (json.JSONDecodeError, KeyError):
-                        pass
-
-                await db.refresh(persona)
-
-                for col in FILE_COLUMNS:
-                    if col not in sent_files:
-                        content = getattr(persona, col)
-                        if content:
-                            yield _sse("file", {"file": col, "content": content})
-                            sent_files.add(col)
-
-                # Send skills once they appear
-                if not skills_sent:
-                    skills = await _get_persona_skills(persona_id, db)
-                    if skills:
-                        yield _sse("skills", {"skills": skills})
-                        skills_sent = True
-
-                # Check for terminal states
-                if persona.status == PersonaStatus.GENERATED:
-                    yield _sse(
-                        "complete",
-                        {
-                            "persona_id": str(persona_id),
-                            "name": persona.name,
-                            "category": persona.category,
-                            "description": persona.description_summary,
-                        },
-                    )
-                    break
-
-                if persona.status == PersonaStatus.FAILED:
-                    yield _sse(
-                        "error",
-                        {
-                            "code": persona.error_code or "GENERATION_FAILED",
-                            "message": "Persona generation failed.",
-                        },
-                    )
-                    break
-
-                # Wait before next poll
-                await asyncio.sleep(POLL_INTERVAL)
-
-        except asyncio.CancelledError:
-            pass
-        finally:
-            await pubsub.unsubscribe(channel)
-            await redis_client.close()
+    if not persona or persona.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Persona not found")
 
     return StreamingResponse(
-        event_generator(),
+        stream_generation(persona_id, persona, db),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",  # disables nginx buffering
+            "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
         },
     )
+
+
+@router.post(
+    "/{persona_id}/publish",
+    summary="Publish persona markdown files to GitHub",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[PublishPersonaResponse],
+)
+async def publish_persona_to_github(
+    persona_id: uuid.UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    persona: Persona | None = await db.get(Persona, persona_id)
+
+    if not persona or persona.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Persona not found")
+
+    if persona.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your persona")
+
+    repo = await create_or_get_repo(
+        slug=persona.name,
+        description=persona.description_summary,
+    )
+
+    files = {
+        "README.md": persona.readme_md,
+        "IDENTITY.md": persona.identity_md,
+        "SOUL.md": persona.soul_md,
+        "DNA.md": persona.dna_md,
+        "OVERVIEW.md": persona.overview_md,
+        "HEARTBEAT.md": persona.heartbeat_md,
+    }
+
+    for filename, content in files.items():
+        await upsert_file(
+            slug=persona.slug,
+            path=filename,
+            content=content,
+            message=f"chore: publish {filename}",
+        )
+
+    default_branch = repo.get("default_branch", "main")
+
+    persona.github_repo_url = repo["html_url"]
+    persona.github_clone_url = repo["clone_url"]
+    persona.github_zip_url = f"{repo['html_url']}/archive/refs/heads/{default_branch}.zip"
+    persona.status = PersonaStatus.PUBLISHED
+    persona.published_at = datetime.now(UTC)
+
+    await db.commit()
+    await db.refresh(persona)
+
+    data = PublishPersonaResponse(
+        persona_id=str(persona.id),
+        status=persona.status,
+        published_at=persona.published_at,
+        github_repo_url=persona.github_repo_url,
+        github_clone_url=persona.github_clone_url,
+        github_zip_url=persona.github_zip_url,
+    )
+
+    return ApiResponse[PublishPersonaResponse](message="Persona published to GitHub.", data=data)
