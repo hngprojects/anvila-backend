@@ -2,7 +2,6 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,40 +10,13 @@ from app.core.paginator import CursorMeta, cursor_paginate
 from app.models.chat_session import ChatSession
 from app.models.conversation_message import ConversationMessage
 from app.models.persona import Persona
+from app.schemas.chat import MessageOut, SessionSummary
 from app.schemas.shared import ApiResponse
 
 router = APIRouter(tags=["chat"])
 
 
-class SessionSummary(BaseModel):
-    session_id: uuid.UUID
-    persona_id: uuid.UUID
-    persona_name: str | None
-    last_message_preview: str | None
-    last_message_at: datetime | None
-    status: str
-
-
-class SessionListResponse(BaseModel):
-    sessions: list[SessionSummary]
-    meta: CursorMeta
-
-
-class MessageOut(BaseModel):
-    id: uuid.UUID
-    role: str
-    content: str
-    round_number: int
-    created_at: datetime
-
-
-class MessageListResponse(BaseModel):
-    messages: list[MessageOut]
-    next_cursor: uuid.UUID | None
-    has_more: bool
-
-
-async def _session_to_summary(session: ChatSession, db: AsyncSession) -> SessionSummary:
+async def _session_to_summary(session: ChatSession, db: AsyncSession):
     """Build a SessionSummary from a ChatSession row."""
     persona = await db.get(Persona, session.persona_id)
 

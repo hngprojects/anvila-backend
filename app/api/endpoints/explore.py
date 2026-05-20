@@ -1,38 +1,21 @@
-import uuid
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
 from sqlalchemy import and_, func, or_, select
 
 from app.api.deps import DBSession
 from app.core.paginator import PageParams, paginate
-from app.models.enums import PersonaCategory, PersonaStatus, PersonaVisibility
+from app.models.enums import PersonaStatus, PersonaVisibility
 from app.models.persona import Persona
 from app.models.persona_skill import PersonaSkill
 from app.models.skill import Skill
+from app.schemas.explore import ExplorePersona, ExploreResponse
 from app.schemas.shared import ApiResponse
 
 router = APIRouter(prefix="/explore", tags=["explore"])
 
 
-class ExplorePersona(BaseModel):
-    id: uuid.UUID
-    name: str
-    description_summary: str
-    category: str
-    github_repo_url: str | None
-    published_at: datetime | None
-    skill_names: list[str]
-
-
-class ExploreResponse(BaseModel):
-    personas: list[ExplorePersona]
-    categories: list[PersonaCategory]
-
-
-@router.get("", response_model=ApiResponse[list[ExplorePersona]])
+@router.get("", response_model=ApiResponse[ExploreResponse])
 async def explore(
     db: DBSession,
     params: Annotated[PageParams, Depends()],
