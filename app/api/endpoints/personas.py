@@ -91,12 +91,22 @@ async def generate(
     user.generation_count += 1
     await db.commit()
 
-    task = generate_persona.delay(
-        str(persona.id),
-        str(session.id),
-        sanitized_prompt,
-        file_content,
-    )
+    try:
+        task = generate_persona.delay(
+            str(persona.id),
+            str(session.id),
+            sanitized_prompt,
+            file_content,
+        )
+    except Exception as exc:
+        user.generation_count = max(0, user.generation_count - 1)
+        persona.status = PersonaStatus.FAILED
+        persona.error_code = "QUEUE_UNAVAILABLE"
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "QUEUE_UNAVAILABLE", "message": "Failed to queue generation job."},
+        ) from exc
     persona.job_id = task.id
     await db.commit()
 

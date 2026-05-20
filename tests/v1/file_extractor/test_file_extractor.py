@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import UploadFile
 
-from app.services.file_extractor import MAX_CHARS, extract_text
+from app.services.file_extractor import MAX_CHARS, MAX_FILE_BYTES, extract_text
 
 
 def _upload(filename: str, content: bytes) -> UploadFile:
@@ -74,3 +74,9 @@ async def test_truncates_long_input_to_max_chars() -> None:
     file = _upload("big.txt", body)
     result = await extract_text(file)
     assert len(result) == MAX_CHARS
+
+
+async def test_rejects_file_larger_than_max_file_bytes() -> None:
+    file = _upload("too-big.txt", b"a" * (MAX_FILE_BYTES + 1))
+    with pytest.raises(ValueError, match="File too large"):
+        await extract_text(file)
