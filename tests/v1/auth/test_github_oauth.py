@@ -6,6 +6,7 @@ from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.security import create_oauth_state_token, create_token
 from app.db.session import AsyncSessionLocal
 from app.models.enums import UserProvider
@@ -155,14 +156,13 @@ async def test_callback_brand_new_user_creates_and_commits(
         f"{BASE}/github/callback",
         params={"code": "the_code", "state": state},
         cookies=cookies,
+        follow_redirects=False,
     )
 
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["success"] is True
-    assert body["data"]["user"]["email"] == "octocat@example.com"
-    assert body["data"]["tokens"]["access_token"]
-    assert body["data"]["tokens"]["refresh_token"]
+    assert resp.status_code == 302
+    assert resp.headers["location"].startswith(
+        f"{settings.FRONTEND_URL}/auth/oauth/callback?ott="
+    )
     set_cookie = resp.headers.get("set-cookie", "")
     assert "refresh_token=" in set_cookie
     _assert_state_cookie_cleared(resp)
@@ -210,10 +210,13 @@ async def test_callback_returning_user_revokes_previous_refresh_tokens(
         f"{BASE}/github/callback",
         params={"code": "code_b", "state": state},
         cookies=cookies,
+        follow_redirects=False,
     )
 
-    assert resp.status_code == 200
-    assert resp.json()["data"]["user"]["email"] == "returning@example.com"
+    assert resp.status_code == 302
+    assert resp.headers["location"].startswith(
+        f"{settings.FRONTEND_URL}/auth/oauth/callback?ott="
+    )
 
     rows = (
         await db_session.execute(
@@ -641,8 +644,9 @@ async def test_callback_code_replay_second_call_502(
         f"{BASE}/github/callback",
         params={"code": "replay_code", "state": state},
         cookies=cookies,
+        follow_redirects=False,
     )
-    assert first.status_code == 200
+    assert first.status_code == 302
 
     state2, cookies2 = _state_pair()
     second = await client.get(
@@ -684,10 +688,12 @@ async def test_callback_race_on_github_subject_logs_winner_in(
         f"{BASE}/github/callback",
         params={"code": "race_code", "state": state},
         cookies=cookies,
+        follow_redirects=False,
     )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["data"]["user"]["id"] == str(racer.id)
+    assert resp.status_code == 302
+    assert resp.headers["location"].startswith(
+        f"{settings.FRONTEND_URL}/auth/oauth/callback?ott="
+    )
     # No new user row was created — the racer is reused.
     count = (
         await db_session.execute(select(func.count()).select_from(User))
