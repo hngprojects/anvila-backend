@@ -108,7 +108,7 @@ async def _fetch_all_skill_markdowns(
 
             except Exception as exc:
                 logger.warning(
-                    "Failed fetching OpenClaw markdown",
+                    "Failed fetching OpenClaw markdown: skill_ref=%s exc=%s",
                     skill_ref,
                     exc,
                 )
