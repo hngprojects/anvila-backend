@@ -114,88 +114,76 @@ async def _upsert_openclaw_skill(
 
     content = await fetch_openclaw_skill_markdown(item.get("id") or item.get("slug") or "")
 
-    result = await db.execute(select(Skill).where(Skill.slug == slug))
-    skill = result.scalar_one_or_none()
+    skill_ref = item.get("id") or item.get("slug") or ""
 
-    if skill is None:
-        skill_ref = item.get("id") or item.get("slug") or ""
-        skill = Skill(
-            slug=slug,
-            name=detail.get("displayName")
-            or item.get("displayName")
-            or slug.replace("-", " ").title(),
-            description=detail.get("summary")
-            or detail.get("description")
-            or item.get("summary")
-            or item.get("description")
-            or "",
-            content=content,
-            category=detail.get("category") or item.get("category") or category,
-            tags=detail.get("tags") or item.get("tags") or [],
-            source_registry=SkillSourceRegistry.OPENCLAW,
-            source_url=detail.get("url")
-            or item.get("url")
-            or f"{settings.OPENCLAW_API_BASE.rstrip('/')}/skills/{skill_ref}/file?path=skill.md",
-            source_author=(
-                (detail.get("owner") or {}).get("displayName")
-                or (item.get("owner") or {}).get("displayName")
-                or detail.get("handle")
-                or item.get("handle")
-            ),
-            install_count=_safe_int(
-                (detail.get("stats") or {}).get("downloads")
-                or (item.get("stats") or {}).get("downloads")
-                or detail.get("install_count")
-                or item.get("install_count")
-                or 0
-            ),
-            is_active=True,
-        )
-        db.add(skill)
-    else:
-        skill.name = detail.get("displayName") or item.get("displayName") or skill.name
-        skill.description = (
+    values = {
+        "name": (
+            detail.get("displayName") or item.get("displayName") or slug.replace("-", " ").title()
+        ),
+        "description": (
             detail.get("summary")
             or detail.get("description")
             or item.get("summary")
             or item.get("description")
-            or skill.description
-        )
-        skill.content = content or skill.content
-        skill.category = detail.get("category") or item.get("category") or skill.category
-        skill.tags = detail.get("tags") or item.get("tags") or skill.tags
-        skill.source_registry = SkillSourceRegistry.OPENCLAW
-        skill_ref = item.get("id") or item.get("slug") or ""
-        skill.source_url = (
+            or ""
+        ),
+        "content": content,
+        "category": detail.get("category") or item.get("category") or category,
+        "tags": detail.get("tags") or item.get("tags") or [],
+        "source_registry": SkillSourceRegistry.OPENCLAW,
+        "source_url": (
             detail.get("url")
             or item.get("url")
             or f"{settings.OPENCLAW_API_BASE.rstrip('/')}/skills/{skill_ref}/file?path=skill.md"
-            or skill.source_url
-        )
-        skill.source_author = (
+        ),
+        "source_author": (
             (detail.get("owner") or {}).get("displayName")
             or (item.get("owner") or {}).get("displayName")
             or detail.get("handle")
             or item.get("handle")
-            or skill.source_author
-        )
-        skill.install_count = _safe_int(
+        ),
+        "install_count": _safe_int(
             (detail.get("stats") or {}).get("downloads")
             or (item.get("stats") or {}).get("downloads")
             or detail.get("install_count")
             or item.get("install_count")
-            or skill.install_count
             or 0
-        )
-        skill.is_active = True
+        ),
+        "is_active": True,
+    }
 
-    async with db.begin_nested():
-        try:
+    result = await db.execute(select(Skill).where(Skill.slug == slug))
+    skill = result.scalar_one_or_none()
+
+    if skill is not None:
+        for field, value in values.items():
+            setattr(skill, field, value)
+
+        await db.flush()
+        return skill
+
+    skill = Skill(slug=slug, **values)
+
+    try:
+        async with db.begin_nested():
+            db.add(skill)
             await db.flush()
-        except IntegrityError:
-            pass
 
-    return skill
+        return skill
+
+    except IntegrityError:
+        # Another transaction inserted the same slug concurrently.
+        result = await db.execute(select(Skill).where(Skill.slug == slug))
+        existing = result.scalar_one_or_none()
+
+        if existing is None:
+            raise
+
+        for field, value in values.items():
+            setattr(existing, field, value)
+
+        await db.flush()
+        return existing
 
 
 async def _get_seeded_skills(
