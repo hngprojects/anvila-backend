@@ -1,77 +1,99 @@
-import base64
+import logging
 
-import httpx
 from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.models.enums import PersonaStatus
+from app.models.persona import Persona
+from app.models.persona_skill import PersonaSkill
+from app.models.skill import Skill
+from app.services.github_service import create_or_get_repo, upsert_file
+from app.utils.slugify import slugify
 
-GITHUB_API = "https://api.github.com"
+logger = logging.getLogger(__name__)
 
 
-def _gh_headers() -> dict:
-    return {
-        "Authorization": f"Bearer {settings.GITHUB_TOKEN}",
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
+PERSONA_FILES: list[tuple[str, str]] = [
+    ("readme_md", "README.md"),
+    ("identity_md", "identity.md"),
+    ("soul_md", "soul.md"),
+    ("dna_md", "dna.md"),
+    ("overview_md", "overview.md"),
+    ("heartbeat_md", "heartbeat.md"),
+]
+
+
+async def publish_persona(persona: Persona, db: AsyncSession) -> Persona:
+    """
+    Publish a persona to GitHub and mark it PUBLISHED.
+    """
+    if persona.status == PersonaStatus.PUBLISHED:
+        logger.info("persona %s already published, skipping", persona.id)
+        return persona
+
+    if persona.status != PersonaStatus.GENERATED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"persona {persona.id} must be GENERATED before publishing "
+            f"(current status: {persona.status})",
+        )
+    slug = slugify(persona.name)
+
+    repo = await create_or_get_repo(
+        slug=slug,
+        description=(persona.description_summary or f"Persona: {persona.name}")[:255],
+    )
+
+    skills = await _get_persona_skills(persona.id, db)
+
+    files = {
+        "README.md": persona.readme_md,
+        "identity.md": persona.identity_md,
+        "soul.md": persona.soul_md,
+        "dna.md": persona.dna_md,
+        "overview.md": persona.overview_md,
+        "heartbeat.md": persona.heartbeat_md,
     }
 
-
-def _b64(content: str | None) -> str:
-    return base64.b64encode((content or "").encode()).decode()
-
-
-async def create_or_get_repo(slug: str, description: str) -> dict:
-    """Create a repo in the org — if it already exists, fetch and return it."""
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            f"{GITHUB_API}/orgs/{settings.GITHUB_ORG}/repos",
-            headers=_gh_headers(),
-            json={
-                "name": slug,
-                "description": description[:255],
-                "private": False,
-                "auto_init": False,
-            },
+    for filename, content in files.items():
+        await upsert_file(
+            slug=slug,
+            path=filename,
+            content=content,
+            message=f"chore: publish {filename}",
         )
 
-    if resp.status_code == 422:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{GITHUB_API}/repos/{settings.GITHUB_ORG}/{slug}",
-                headers=_gh_headers(),
-            )
-
-    if not resp.is_success:
-        raise HTTPException(
-            status_code=502,
-            detail=f"GitHub repo creation failed: {resp.text}",
+    # Persona markdown files → repo root
+    for skill in skills:
+        await upsert_file(
+            slug=slug,
+            path=f"skills/{skill.slug}.md",
+            content=skill.content,
+            message=f"chore: add skill {skill.slug}",
         )
 
-    return resp.json()
+    persona.status = PersonaStatus.PUBLISHED
+    persona.github_repo_url = repo.get("html_url")
+    persona.github_clone_url = repo.get("clone_url")
+    persona.github_zip_url = (
+        f"{repo.get('html_url', '')}/archive/refs/heads/{repo.get('default_branch', 'main')}.zip"
+    )
+    await db.commit()
+
+    logger.info(
+        "persona %s published to %s with %d skill(s)",
+        persona.id,
+        persona.github_repo_url,
+        len(skills),
+    )
+    return persona
 
 
-async def upsert_file(slug: str, path: str, content: str | None, message: str) -> None:
-    """Push a single file — creates it if new, updates it if already exists."""
-    if not content:
-        return
-
-    url = f"{GITHUB_API}/repos/{settings.GITHUB_ORG}/{slug}/contents/{path}"
-
-    async with httpx.AsyncClient() as client:
-        existing = await client.get(url, headers=_gh_headers())
-
-    payload: dict = {
-        "message": message,
-        "content": _b64(content),
-    }
-    if existing.is_success:
-        payload["sha"] = existing.json()["sha"]
-
-    async with httpx.AsyncClient() as client:
-        resp = await client.put(url, headers=_gh_headers(), json=payload)
-
-    if not resp.is_success:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to write {path}: {resp.text}",
-        )
+async def _get_persona_skills(persona_id, db: AsyncSession) -> list[Skill]:
+    result = await db.execute(
+        select(Skill)
+        .join(PersonaSkill, PersonaSkill.skill_id == Skill.id)
+        .where(PersonaSkill.persona_id == persona_id)
+    )
+    return list(result.scalars().all())
