@@ -17,7 +17,7 @@ class GeminiAdapter(LLMAdapter):
         response = self.client.models.generate_content(model=self._model_name, contents=prompt)
         usage = getattr(response, "usage_metadata", None)
         return LLMResponse(
-            content=response.text,
+            content=response.text or "",
             input_tokens=getattr(usage, "prompt_token_count", 0),
             output_tokens=getattr(usage, "candidates_token_count", 0),
             total_tokens=getattr(usage, "total_token_count", 0),

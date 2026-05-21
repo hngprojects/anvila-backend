@@ -6,7 +6,7 @@ class LLMResponse:
     # The raw text response from the model.
     # Always a string. Never None. May be an empty string if the model
     # returned an empty response (caller should treat this as an error).
-    content: str | None
+    content: str
 
     # Number of tokens consumed by the prompt sent to the model.
     # Source: response.usage_metadata.prompt_token_count (Gemini)
