@@ -40,9 +40,8 @@ from app.services.auth import get_user_by_id
 from app.services.context_manager import ContextManager
 from app.services.file_extractor import extract_text
 from app.services.prompt_sanitizer import PromptSanitizer
-from app.services.publish_service import create_or_get_repo, publish_persona, upsert_file
+from app.services.publish_service import publish_persona
 from app.services.stream_service import stream_generation
-from app.utils.slugify import slugify
 from app.worker.tasks.generation import generate_persona
 
 MAX_CLARIFICATION_ROUNDS = 5
