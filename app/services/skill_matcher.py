@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,9 @@ from app.services.openclaw_client import (
     fetch_openclaw_skill_markdown,
     search_openclaw_skills,
 )
+from app.services.publish_service import create_or_get_repo, upsert_file
+
+SKILLS_REPO = "skills"
 
 logger = logging.getLogger(__name__)
 
@@ -34,15 +37,18 @@ async def match_skills(
             exclude_slugs=set(),
         )
 
-    local_skills = await _get_local_skills_by_slugs(normalized_slugs, db)
+    local_pool = await _get_local_skill_pool(category, db)
+    local_by_slug = {s.slug: s for s in local_pool}
 
     resolved: list[Skill] = []
     seen_slugs: set[str] = set()
 
     for slug in normalized_slugs:
-        skill = local_skills.get(slug)
+        skill = local_by_slug.get(slug) or _find_similar(slug, local_pool, exclude_slugs=seen_slugs)
 
-        if skill is None:
+        if skill is not None:
+            logger.debug("reusing local skill %s for suggestion %s", skill.slug, slug)
+        else:
             skill = await _fetch_openclaw_skill(slug, category, db)
 
         if skill and skill.slug not in seen_slugs:
@@ -59,6 +65,29 @@ async def match_skills(
         resolved.extend(padding)
 
     return resolved[:6]
+
+
+async def push_skill_to_org_repo(skill: Skill) -> None:
+    """
+    Push a skill to the shared org skills repo as <slug>.md.
+    """
+    try:
+        await create_or_get_repo(
+            slug=SKILLS_REPO,
+            description="Shared skill library",
+        )
+        await upsert_file(
+            slug=SKILLS_REPO,
+            path=f"{skill.slug}.md",
+            content=skill.content,
+            message=f"chore: upsert skill {skill.slug}",
+        )
+        logger.info("pushed skill %s to org skills repo", skill.slug)
+    except Exception:
+        logger.exception(
+            "GitHub push failed for skill %s — saved locally, continuing",
+            skill.slug,
+        )
 
 
 async def _fetch_openclaw_skill(
@@ -88,12 +117,16 @@ async def _fetch_openclaw_skill(
         logger.warning("OpenClaw detail fetch failed for skill %s: %s", skill_id, exc)
         detail = None
 
-    return await _upsert_openclaw_skill(
+    skill = await _upsert_openclaw_skill(
         item=item,
         detail=detail or item,
         category=category,
         db=db,
     )
+
+    if skill is not None:
+        await push_skill_to_org_repo(skill)
+    return skill
 
 
 async def _upsert_openclaw_skill(
@@ -254,19 +287,51 @@ def _normalize_slugs(raw_slugs: list[str], limit: int = 6) -> list[str]:
     return normalized
 
 
-async def _get_local_skills_by_slugs(
-    slugs: list[str],
-    db: AsyncSession,
-) -> dict[str, Skill]:
-    """Fetch all active local skills for given slugs in one query."""
-    if not slugs:
-        return {}
+def _find_similar(
+    slug: str,
+    pool: list[Skill],
+    exclude_slugs: set[str],
+) -> Skill | None:
+    """
+    Find a skill in `pool` that is similar to `slug` without a DB query.
+    """
+    keywords = [w for w in slug.split("-") if len(w) > 2]
 
+    if len(keywords) < 2:
+        return None
+
+    for skill in pool:
+        if skill.slug in exclude_slugs:
+            continue
+
+        name_words = set(skill.name.lower().split())
+        tags = {t.lower() for t in (skill.tags or [])}
+
+        name_match = all(kw in name_words for kw in keywords)
+        tag_match = any(kw in tags for kw in keywords)
+
+        if name_match or tag_match:
+            return skill
+
+    return None
+
+
+async def _get_local_skill_pool(
+    category: str,
+    db: AsyncSession,
+) -> list[Skill]:
+    """
+    Fetch all active local skills for a category in one query.
+
+    Used to power both exact-slug lookup and similarity matching without
+    issuing per-slug queries. Also includes skills with no category set
+    (source_registry=ANVILA seeds often omit it) so they're available as
+    fallback candidates.
+    """
     result = await db.execute(
         select(Skill).where(
-            Skill.slug.in_(slugs),
             Skill.is_active.is_(True),
+            or_(Skill.category == category, Skill.category.is_(None)),
         )
     )
-
-    return {skill.slug: skill for skill in result.scalars().all()}
+    return list(result.scalars().all())
