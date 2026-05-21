@@ -1,6 +1,6 @@
 import re
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/skills")
 async def sync_skills(
     user: AdminUser,
     category: str | None = None,
-    limit: int | None = None,
+    limit: int | None = 1,
 ) -> ApiResponse:
     """Synchronise skills from the external openclaw registry."""
     result = await sync_skills_from_registry(category=category, limit=limit)
@@ -79,8 +79,8 @@ async def create_skill(
     except IntegrityError as e:
         await db.rollback()
         # Check if this is a unique constraint violation on slug
-        error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
-        if 'slug' in error_msg.lower() and 'unique' in error_msg.lower():
+        error_msg = str(e.orig) if hasattr(e, "orig") else str(e)
+        if "slug" in error_msg.lower() and "unique" in error_msg.lower():
             return JSONResponse(
                 status_code=status.HTTP_409_CONFLICT,
                 content=ErrorDetail(
@@ -150,19 +150,15 @@ async def delete_skill(
     slug: str,
     db: DBSession,
     user: AdminUser,
-) -> None | JSONResponse:
+):
     """Soft-delete a skill by setting is_active to false."""
     result = await db.execute(select(Skill).where(Skill.slug == slug))
     skill = result.scalar_one_or_none()
 
     if skill is None:
-        return JSONResponse(
+        raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            content=ErrorDetail(
-                message="Skill not found",
-                code=status.HTTP_404_NOT_FOUND,
-                field="slug",
-            ).model_dump(),
+            detail="Skill not found",
         )
 
     skill.is_active = False
