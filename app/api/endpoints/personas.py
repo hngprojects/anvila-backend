@@ -40,9 +40,8 @@ from app.services.auth import get_user_by_id
 from app.services.context_manager import ContextManager
 from app.services.file_extractor import extract_text
 from app.services.prompt_sanitizer import PromptSanitizer
-from app.services.publish_service import create_or_get_repo, upsert_file
+from app.services.publish_service import publish_persona
 from app.services.stream_service import stream_generation
-from app.utils.slugify import slugify
 from app.worker.tasks.generation import generate_persona
 
 MAX_CLARIFICATION_ROUNDS = 5
@@ -456,45 +455,7 @@ async def publish_persona_to_github(
     if persona.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not your persona")
 
-    if persona.status != PersonaStatus.GENERATED:
-        raise HTTPException(
-            status_code=400,
-            detail="Persona must be generated before publishing",
-        )
-
-    slug = slugify(persona.name)
-
-    repo = await create_or_get_repo(
-        slug=slug,
-        description=persona.description_summary,
-    )
-
-    files = {
-        "README.md": persona.readme_md,
-        "IDENTITY.md": persona.identity_md,
-        "SOUL.md": persona.soul_md,
-        "DNA.md": persona.dna_md,
-        "OVERVIEW.md": persona.overview_md,
-        "HEARTBEAT.md": persona.heartbeat_md,
-    }
-
-    for filename, content in files.items():
-        await upsert_file(
-            slug=slug,
-            path=filename,
-            content=content,
-            message=f"chore: publish {filename}",
-        )
-
-    default_branch = repo.get("default_branch", "main")
-
-    persona.github_repo_url = repo["html_url"]
-    persona.github_clone_url = repo["clone_url"]
-    persona.github_zip_url = f"{repo['html_url']}/archive/refs/heads/{default_branch}.zip"
-    persona.status = PersonaStatus.PUBLISHED
-    persona.published_at = datetime.now(UTC)
-
-    await db.commit()
+    persona = await publish_persona(persona, db)
     await db.refresh(persona)
 
     data = PublishPersonaResponse(
