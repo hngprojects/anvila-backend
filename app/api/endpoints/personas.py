@@ -263,7 +263,7 @@ async def list_personas(
     rows, meta = await paginate(db, query, params)
     return ApiResponse[list[PersonaSummary]](
         message="Personas retrieved.",
-        data=[PersonaSummary.model_validate(r) for r in rows],
+        data=[PersonaSummary.model_validate(r, from_attributes=True) for r in rows],
         meta=meta.model_dump(),
     )
 
