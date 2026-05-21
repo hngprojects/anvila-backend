@@ -1,6 +1,4 @@
-import asyncio
-
-import google.generativeai as genai
+from google import genai
 
 from app.core.config import settings
 from app.services.llm.base import LLMAdapter
@@ -9,18 +7,14 @@ from app.services.llm.types import LLMResponse
 
 class GeminiAdapter(LLMAdapter):
     def __init__(self) -> None:
-        genai.configure(api_key=settings.GEMINI_API_KEY)
+        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
         self._model_name: str = settings.GEMINI_MODEL_NAME
-        self._model = genai.GenerativeModel(self._model_name)
 
     def build_prompt(self, prompt: str) -> str:
         return prompt
 
     async def generate(self, prompt: str) -> LLMResponse:
-        response = await asyncio.wait_for(
-            self._model.generate_content_async(prompt),
-            timeout=settings.GEMINI_TIMEOUT_SECONDS,
-        )
+        response = self.client.models.generate_content(model=self._model_name, contents=prompt)
         usage = getattr(response, "usage_metadata", None)
         return LLMResponse(
             content=response.text,
