@@ -455,6 +455,12 @@ async def publish_persona_to_github(
     if persona.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not your persona")
 
+    if persona.status != PersonaStatus.GENERATED:
+        raise HTTPException(
+            status_code=400,
+            detail="Persona must be generated before publishing",
+        )
+
     repo = await create_or_get_repo(
         slug=persona.name,
         description=persona.description_summary,
