@@ -42,6 +42,7 @@ from app.services.file_extractor import extract_text
 from app.services.prompt_sanitizer import PromptSanitizer
 from app.services.publish_service import create_or_get_repo, upsert_file
 from app.services.stream_service import stream_generation
+from app.utils.slugify import slugify
 from app.worker.tasks.generation import generate_persona
 
 MAX_CLARIFICATION_ROUNDS = 5
@@ -461,8 +462,10 @@ async def publish_persona_to_github(
             detail="Persona must be generated before publishing",
         )
 
+    slug = slugify(persona.name)
+
     repo = await create_or_get_repo(
-        slug=persona.name,
+        slug=slug,
         description=persona.description_summary,
     )
 
@@ -477,7 +480,7 @@ async def publish_persona_to_github(
 
     for filename, content in files.items():
         await upsert_file(
-            slug=persona.name,
+            slug=slug,
             path=filename,
             content=content,
             message=f"chore: publish {filename}",
