@@ -41,7 +41,7 @@ class ChatSession(BaseModel):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # relationships
-    persona: Mapped["Persona"] = relationship(back_populates="chat_sessions")
+    persona: Mapped["Persona"] = relationship(back_populates="chat_session")
     user: Mapped["User"] = relationship(back_populates="chat_sessions")
     messages: Mapped[list["ConversationMessage"]] = relationship(
         back_populates="session",

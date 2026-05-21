@@ -4,8 +4,6 @@ from app.services.llm.types import LLMResponse
 
 
 class LLMAdapter(ABC):
-    SYSTEM_PROMPT: str
-
     @abstractmethod
     def build_prompt(self, prompt: str) -> str:
         # Builds the final prompt by injecting user prompt into a template

@@ -73,6 +73,9 @@ class Settings(BaseSettings):
 
     OPENCLAW_API_BASE: str = "https://clawhub.ai/api/v1"
 
+    GITHUB_TOKEN: str | None = None
+    GITHUB_ORG: str | None = None
+
     @model_validator(mode="after")
     def _validate_github_oauth_credentials(self) -> "Settings":
         if not self.GITHUB_OAUTH_ENABLED:
@@ -99,6 +102,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     LLM_PROVIDER: str = "gemini"
     GEMINI_API_KEY: str | None = None
+    GEMINI_MODEL_NAME: str = "gemini-3.5-flash"
     GEMINI_TIMEOUT_SECONDS: Annotated[int, Field(gt=0)] = 30
 
     @model_validator(mode="after")
