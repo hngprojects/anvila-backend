@@ -12,4 +12,3 @@ api_router.include_router(leads.router)
 api_router.include_router(admin_router.api_router)
 api_router.include_router(personas.router)
 api_router.include_router(skills.router)
-

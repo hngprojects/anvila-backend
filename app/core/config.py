@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     OAUTH_LINK_TOKEN_EXPIRE_MINUTES: int = 30
 
     OPENCLAW_API_BASE: str = "https://clawhub.ai/api/v1"
+
     GITHUB_TOKEN: str | None = None
     GITHUB_ORG: str | None = None
 

@@ -10,7 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
-from app.models.enums import PersonaStatus
+from app.models.conversation_message import ConversationMessage
+from app.models.enums import MessageRole, PersonaStatus
 from app.models.persona import Persona
 from app.models.persona_skill import PersonaSkill
 from app.models.skill import Skill
@@ -18,6 +19,14 @@ from app.models.skill import Skill
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = 1.5
+
+# Timeout (seconds) to wait for a ConversationMessage to appear after
+# NEEDS_CLARIFICATION status is detected. The Celery task commits the
+# persona status and the message in the same db.commit(), but the poller
+# may read the new status in the same cycle before the commit propagates
+# (read-your-writes lag on async connections). We retry for up to this
+# many seconds before giving up and waiting for the next poll cycle.
+CLARIFICATION_MSG_WAIT = 3.0
 
 FILE_COLUMNS = [
     "identity_md",
@@ -54,90 +63,42 @@ async def _get_skills(persona_id: uuid.UUID, db: AsyncSession) -> list[dict]:
     ]
 
 
-async def _listen_redis(
+async def _fetch_clarification_message(
     persona_id: uuid.UUID,
-    queue: asyncio.Queue,
-    stop_event: asyncio.Event,
-) -> None:
-    """Subscribe to persona:{id}:events and forward events to the queue.
-
-    Handles:
-      clarification — forwarded as-is to the stream client.
-      error         — forwarded to the stream client, then stop_event is set
-                      so _poll_db exits on its next iteration (fast-path
-                      shutdown on Celery task failure).
-
-    Runs until stop_event is set (driven by _poll_db on terminal DB state,
-    or by this task itself on a Redis error event).
+    round_num: int,
+    db: AsyncSession,
+) -> list | None:
     """
-    channel = f"persona:{persona_id}:events"
-    redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-    pubsub = redis_client.pubsub()
+    Fetch the clarification questions for a given round from the DB.
 
-    try:
-        await pubsub.subscribe(channel)
+    Retries for up to CLARIFICATION_MSG_WAIT seconds to handle the small
+    window where the Celery task has committed the persona status but the
+    ConversationMessage row is not yet visible to this connection.
 
-        while not stop_event.is_set():
+    Returns the parsed questions list, or None if the message was not found
+    within the retry window (caller should wait for the next poll cycle).
+    """
+    deadline = asyncio.get_running_loop().time() + CLARIFICATION_MSG_WAIT
+    while asyncio.get_running_loop().time() < deadline:
+        result = await db.execute(
+            select(ConversationMessage)
+            .where(
+                ConversationMessage.persona_id == persona_id,
+                ConversationMessage.role == MessageRole.ASSISTANT,
+                ConversationMessage.round_number == round_num,
+            )
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(1)
+            .execution_options(populate_existing=True)
+        )
+        msg = result.scalar_one_or_none()
+        if msg is not None:
             try:
-                message = await asyncio.wait_for(
-                    pubsub.get_message(ignore_subscribe_messages=True, timeout=0.5),
-                    timeout=1.0,
-                )
-            except TimeoutError:
-                continue
-
-            if not message:
-                continue
-
-            if message.get("type") != "message":
-                continue
-
-            try:
-                payload = json.loads(message["data"])
+                return json.loads(msg.content)
             except (json.JSONDecodeError, TypeError):
-                logger.warning("stream: malformed Redis message for persona %s", persona_id)
-                continue
-
-            msg_type = payload.get("type")
-
-            if msg_type == "clarification":
-                await queue.put(
-                    _sse(
-                        "clarification",
-                        {
-                            "round": payload.get("round", 0),
-                            "questions": payload.get("questions", []),
-                        },
-                    )
-                )
-
-            elif msg_type == "error":
-                # Celery task published a terminal error — surface it
-                # immediately and stop waiting.
-                await queue.put(
-                    _sse(
-                        "error",
-                        {
-                            "code": payload.get("code", "GENERATION_FAILED"),
-                            "message": payload.get("message", "Persona generation failed."),
-                        },
-                    )
-                )
-                # Signal _poll_db to stop on its next iteration.
-                stop_event.set()
-                break
-
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        logger.exception("stream: Redis listener error for persona %s", persona_id)
-    finally:
-        try:
-            await pubsub.unsubscribe(channel)
-            await pubsub.aclose()
-        except Exception:
-            pass
-        await redis_client.aclose()
+                return []
+        await asyncio.sleep(0.3)
+    return None
 
 
 async def _poll_db(
@@ -145,31 +106,31 @@ async def _poll_db(
     queue: asyncio.Queue,
     stop_event: asyncio.Event,
 ) -> None:
-    """Poll the persona row on its own dedicated DB session.
+    """
+    Single source of truth for all SSE events.
 
-    Uses NullPool so it never competes with the request-scoped session for
-    a connection — avoids asyncpg "another operation is in progress" errors.
+    Uses NullPool so it never competes with the request-scoped session.
 
-    Emits:
-      file      — once per column, as soon as the column becomes non-null.
-      skills    — once, as soon as PersonaSkill rows exist.
-      complete  — when status == GENERATED (after flushing any remaining files).
-      error     — when status == FAILED (belt-and-suspenders; Celery task also
-                  publishes to Redis for faster delivery).
+    Emits (in order as they become available):
+      file          — once per column, as soon as non-null.
+      skills        — once, as soon as PersonaSkill rows exist.
+      clarification — once per round, when NEEDS_CLARIFICATION + message row ready.
+      complete      — when status == GENERATED.
+      error         — when status == FAILED, or persona disappears.
 
-    Sets stop_event on any terminal state, which causes _listen_redis to exit.
-    Always puts _DONE on the queue in its finally block so stream_generation
-    stops yielding.
+    Sets stop_event on any terminal state.
+    Always puts _DONE on the queue in its finally block.
     """
     sent_files: set[str] = set()
     skills_sent = False
+    clarification_sent: set[int] = set()
 
     engine = create_async_engine(str(settings.DATABASE_URL), poolclass=NullPool)
     try:
         async with AsyncSession(engine, expire_on_commit=False) as db:
             while not stop_event.is_set():
-                # Force a real DB round-trip on every cycle — never trust the
-                # identity-map cache for a long-running poll loop.
+                # Force a real DB round-trip — never trust the identity-map
+                # cache in a long-running poll loop.
                 result = await db.execute(
                     select(Persona)
                     .where(Persona.id == persona_id)
@@ -190,7 +151,7 @@ async def _poll_db(
                     stop_event.set()
                     break
 
-                # Emit any newly populated file columns.
+                # ── Emit new file columns ──────────────────────────────────
                 for col in FILE_COLUMNS:
                     if col not in sent_files:
                         content = getattr(persona, col)
@@ -198,17 +159,39 @@ async def _poll_db(
                             await queue.put(_sse("file", {"file": col, "content": content}))
                             sent_files.add(col)
 
-                # Emit skills once they appear.
+                # ── Emit skills once they appear ───────────────────────────
                 if not skills_sent:
                     skills = await _get_skills(persona_id, db)
                     if skills:
                         await queue.put(_sse("skills", {"skills": skills}))
                         skills_sent = True
 
+                # ── Clarification ──────────────────────────────────────────
+                if persona.status == PersonaStatus.NEEDS_CLARIFICATION:
+                    round_num = persona.clarification_rounds
+                    if round_num not in clarification_sent:
+                        questions = await _fetch_clarification_message(persona_id, round_num, db)
+                        if questions is not None:
+                            # questions == [] is still a valid (empty) list —
+                            # emit it so the client knows a round started.
+                            await queue.put(
+                                _sse(
+                                    "clarification",
+                                    {
+                                        "round": round_num,
+                                        "questions": questions,
+                                    },
+                                )
+                            )
+                            clarification_sent.add(round_num)
+                        # If questions is None the message row wasn't ready yet;
+                        # fall through and poll again after POLL_INTERVAL.
+                    await asyncio.sleep(POLL_INTERVAL)
+                    continue
+
                 # ── Terminal: success ──────────────────────────────────────
                 if persona.status == PersonaStatus.GENERATED:
-                    # Flush any files that arrived in this same poll cycle
-                    # but weren't caught above.
+                    # One final sweep for any files that arrived this cycle.
                     for col in FILE_COLUMNS:
                         if col not in sent_files:
                             content = getattr(persona, col)
@@ -237,21 +220,18 @@ async def _poll_db(
 
                 # ── Terminal: failure ──────────────────────────────────────
                 if persona.status == PersonaStatus.FAILED:
-                    # Only emit here if stop_event isn't already set — if
-                    # _listen_redis already forwarded the Redis error event
-                    # and set stop_event, we skip the duplicate.
-                    if not stop_event.is_set():
-                        await queue.put(
-                            _sse(
-                                "error",
-                                {
-                                    "code": persona.error_code or "GENERATION_FAILED",
-                                    "message": "Persona generation failed.",
-                                },
-                            )
+                    await queue.put(
+                        _sse(
+                            "error",
+                            {
+                                "code": persona.error_code or "GENERATION_FAILED",
+                                "message": "Persona generation failed.",
+                            },
                         )
+                    )
                     stop_event.set()
                     break
+
                 await asyncio.sleep(POLL_INTERVAL)
 
     except asyncio.CancelledError:
@@ -264,21 +244,95 @@ async def _poll_db(
         await engine.dispose()
 
 
+async def _listen_redis_for_errors(
+    persona_id: uuid.UUID,
+    queue: asyncio.Queue,
+    stop_event: asyncio.Event,
+) -> None:
+    """
+    Lightweight Redis listener — only forwards 'error' events.
+
+    This gives faster failure notification when the Celery task publishes a
+    terminal error (e.g. CLARIFICATION_TIMEOUT, INTERNAL_ERROR) before the
+    DB poller's next POLL_INTERVAL tick catches it via status == FAILED.
+
+    Clarification events are intentionally NOT handled here; _poll_db is
+    the single source of truth for them to avoid race conditions between
+    the Redis publish and the ConversationMessage commit.
+    """
+    channel = f"persona:{persona_id}:events"
+    redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    pubsub = redis_client.pubsub()
+
+    try:
+        await pubsub.subscribe(channel)
+
+        while not stop_event.is_set():
+            try:
+                message = await asyncio.wait_for(
+                    pubsub.get_message(ignore_subscribe_messages=True, timeout=0.5),
+                    timeout=1.0,
+                )
+            except TimeoutError:
+                continue
+
+            if not message or message.get("type") != "message":
+                continue
+
+            try:
+                payload = json.loads(message["data"])
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("stream: malformed Redis message for persona %s", persona_id)
+                continue
+
+            if payload.get("type") == "error":
+                await queue.put(
+                    _sse(
+                        "error",
+                        {
+                            "code": payload.get("code", "GENERATION_FAILED"),
+                            "message": payload.get("message", "Persona generation failed."),
+                        },
+                    )
+                )
+                stop_event.set()
+                break
+
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception("stream: Redis error-listener error for persona %s", persona_id)
+    finally:
+        try:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+        except Exception:
+            pass
+        await redis_client.aclose()
+
+
 async def stream_generation(
     persona_id: uuid.UUID,
     persona: Persona,
     db: AsyncSession,
 ) -> AsyncIterator[str]:
-    """Main entry point called by the stream endpoint.
-
-    Handles already-terminal states immediately (no background tasks needed).
-    For in-progress personas, starts _listen_redis and _poll_db concurrently.
-
-    The `db` parameter is the request-scoped session and is only used here
-    for the already-terminal fast-path reads. _poll_db opens its own session
-    with NullPool to avoid concurrent-use errors.
     """
-    # ── Fast-path: already done ────────────────────────────────────────────
+    Main entry point called by the stream endpoint.
+
+    Always emits a 'start' event immediately so clients know the connection
+    is live before any generation work begins.
+
+    Handles already-terminal states in a fast path (no background tasks).
+    For in-progress personas, runs _poll_db (primary) and
+    _listen_redis_for_errors (fast error notification) concurrently.
+
+    The `db` parameter is the request-scoped session used only for the
+    fast-path reads. _poll_db opens its own NullPool session.
+    """
+    # Always emit start so the client knows the stream is healthy.
+    yield _sse("start", {"persona_id": str(persona_id)})
+
+    # ── Fast-path: already terminal ────────────────────────────────────────
     if persona.status == PersonaStatus.GENERATED:
         for col in FILE_COLUMNS:
             content = getattr(persona, col)
@@ -310,16 +364,17 @@ async def stream_generation(
         )
         return
 
+    # ── Live path: spin up background tasks ───────────────────────────────
     queue: asyncio.Queue[str | object] = asyncio.Queue()
     stop_event = asyncio.Event()
 
-    redis_task = asyncio.create_task(
-        _listen_redis(persona_id, queue, stop_event),
-        name=f"redis-listener-{persona_id}",
-    )
     db_task = asyncio.create_task(
         _poll_db(persona_id, queue, stop_event),
         name=f"db-poller-{persona_id}",
+    )
+    redis_task = asyncio.create_task(
+        _listen_redis_for_errors(persona_id, queue, stop_event),
+        name=f"redis-error-listener-{persona_id}",
     )
 
     try:

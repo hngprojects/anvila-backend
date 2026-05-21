@@ -305,7 +305,7 @@ async def process_github_callback(
             db, user=existing_by_email, request=request
         )
         _logger.info(
-            "event=auth.oauth.github.callback.success outcome=auto_linked user_id=%s email_hash=%s",
+            "event=auth.oauth.github.link_pending outcome=link_required user_id=%s email_hash=%s",
             existing_by_email.id,
             email_hash,
         )
