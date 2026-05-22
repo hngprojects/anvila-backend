@@ -18,6 +18,11 @@ GENERATION_SYSTEM_PROMPT + sanitized_user + optional file_content for round 0,
 and ContextManager.build_followup_prompt for rounds 1+. The clarify endpoint
 never composes prompts — it only writes the compressed_context and signals
 continue.
+
+Error signaling:
+  On any terminal failure this task BOTH writes persona.status = FAILED to the
+  DB *and* publishes an "error" event to persona:{id}:events so the SSE stream
+  can surface it immediately without waiting for the next DB poll cycle.
 """
 
 from __future__ import annotations
@@ -25,10 +30,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import uuid
 
 from redis.asyncio import Redis
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from app.worker.celery_app import celery_app
 
@@ -63,8 +71,8 @@ GENERATION FORMAT:
 {
   "type": "generation",
   "persona_name": "2-4 word name",
-  "category": "sales|devops|marketing|support|engineering|hr|finance|legal|product|design|research|
-  development",
+  "category": "sales|devops|marketing|support|engineering|hr|finance|legal|product|design|
+  research|development",
   "short_description": "one sentence",
   "suggested_skills": ["slug-one", "slug-two"],
   "files": {
@@ -102,6 +110,25 @@ class _NoRetry(Exception):
     """
 
 
+async def _publish_error(
+    redis_client,
+    events_channel: str,
+    code: str,
+    message: str,
+) -> None:
+    """Publish an error event to the SSE events channel.
+
+    Best-effort — we never want this helper to mask the original failure.
+    """
+    try:
+        await redis_client.publish(
+            events_channel,
+            json.dumps({"type": "error", "code": code, "message": message}),
+        )
+    except Exception:
+        logger.exception("failed to publish error event to %s", events_channel)
+
+
 async def _run_generation(
     persona_id: str,
     session_id: str,
@@ -109,9 +136,9 @@ async def _run_generation(
     file_content: str | None,
 ) -> None:
     from app.core.config import settings
-    from app.db.session import AsyncSessionLocal
     from app.models.chat_session import ChatSession
-    from app.models.enums import PersonaCategory, PersonaStatus, SessionStatus
+    from app.models.conversation_message import ConversationMessage
+    from app.models.enums import MessageRole, PersonaCategory, PersonaStatus, SessionStatus
     from app.models.persona import Persona
     from app.models.persona_skill import PersonaSkill
     from app.models.user import User
@@ -126,12 +153,16 @@ async def _run_generation(
     events_channel = f"persona:{persona_id}:events"
     continue_channel = f"persona:{persona_id}:continue"
 
+    engine = create_async_engine(str(settings.DATABASE_URL), poolclass=NullPool)
+
     try:
-        async with AsyncSessionLocal() as db:
+        async with AsyncSession(engine, expire_on_commit=False) as db:
             persona = await db.get(Persona, uuid.UUID(persona_id))
             session = await db.get(ChatSession, uuid.UUID(session_id))
+
             if persona is None or session is None:
                 raise _NoRetry("persona or session missing")
+
             if session.persona_id != persona.id or session.user_id != persona.user_id:
                 raise _NoRetry("persona/session mismatch")
 
@@ -149,12 +180,15 @@ async def _run_generation(
 
             user = (await db.execute(select(User).where(User.id == persona.user_id))).scalar_one()
 
-            round_prompt = f"{GENERATION_SYSTEM_PROMPT}\n\n{sanitized_prompt}"
+            round_prompt = (
+                f"{GENERATION_SYSTEM_PROMPT}\n\n<USER_INPUT>\n{sanitized_prompt}\n</USER_INPUT>"
+            )
             if file_content:
                 round_prompt += f"\n\n<FILE_CONTENT>\n{file_content}\n</FILE_CONTENT>"
 
             parsed: dict | None = None
-            while session.clarification_round <= MAX_CLARIFICATION_ROUNDS:
+
+            while persona.clarification_rounds <= MAX_CLARIFICATION_ROUNDS:
                 persona.status = PersonaStatus.GENERATING
                 await db.commit()
 
@@ -169,98 +203,148 @@ async def _run_generation(
                     persona.status = PersonaStatus.FAILED
                     persona.error_code = "INVALID_LLM_RESPONSE"
                     await db.commit()
+                    await _publish_error(
+                        redis_client,
+                        events_channel,
+                        "INVALID_LLM_RESPONSE",
+                        "LLM returned malformed JSON.",
+                    )
                     raise _NoRetry("invalid LLM JSON") from exc
+
                 if not isinstance(parsed, dict):
                     persona.status = PersonaStatus.FAILED
                     persona.error_code = "INVALID_LLM_RESPONSE"
                     await db.commit()
+                    await _publish_error(
+                        redis_client,
+                        events_channel,
+                        "INVALID_LLM_RESPONSE",
+                        "LLM returned unexpected JSON shape.",
+                    )
                     raise _NoRetry("invalid LLM JSON shape")
 
                 kind = parsed.get("type")
+
                 if kind == "generation":
                     break
 
                 if kind == "clarification":
-                    if session.clarification_round >= MAX_CLARIFICATION_ROUNDS:
+                    if persona.clarification_rounds >= MAX_CLARIFICATION_ROUNDS:
                         persona.status = PersonaStatus.FAILED
                         persona.error_code = "MAX_ROUNDS_REACHED"
                         await db.commit()
+                        await _publish_error(
+                            redis_client,
+                            events_channel,
+                            "MAX_ROUNDS_REACHED",
+                            "Maximum clarification rounds reached.",
+                        )
                         raise _NoRetry("max clarification rounds")
+
+                    persona.clarification_rounds += 1
                     persona.status = PersonaStatus.NEEDS_CLARIFICATION
+                    db.add(
+                        ConversationMessage(
+                            session_id=session.id,
+                            persona_id=persona.id,
+                            role=MessageRole.ASSISTANT,
+                            content=json.dumps(parsed.get("questions", [])),
+                            round_number=persona.clarification_rounds,
+                        )
+                    )
                     await db.commit()
-                    payload = {
-                        "type": "clarification",
-                        "round": session.clarification_round,
-                        "questions": parsed.get("questions", []),
-                    }
-                    pubsub = redis_client.pubsub()
-                    await pubsub.subscribe(continue_channel)
-                    try:
-                        await redis_client.publish(events_channel, json.dumps(payload))
-                        deadline = asyncio.get_running_loop().time() + CLARIFICATION_TIMEOUT_SECONDS
-                        got_continue = False
-                        while asyncio.get_running_loop().time() < deadline:
-                            msg = await pubsub.get_message(
-                                ignore_subscribe_messages=True,
-                                timeout=PUBSUB_POLL_INTERVAL_SECONDS,
-                            )
-                            if msg and msg.get("type") == "message":
-                                try:
-                                    continue_payload = json.loads(msg["data"])
-                                except (TypeError, json.JSONDecodeError):
-                                    logger.warning(
-                                        "dropping non-JSON continue message: %r",
-                                        msg.get("data"),
-                                    )
-                                    continue
-                                if not isinstance(continue_payload, dict):
-                                    logger.warning(
-                                        "dropping non-object continue message: %r",
-                                        continue_payload,
-                                    )
-                                    continue
-                                if continue_payload.get("type") != "continue":
-                                    logger.warning(
-                                        "dropping continue message with wrong type: %r",
-                                        continue_payload.get("type"),
-                                    )
-                                    continue
-                                if continue_payload.get("session_id") != session_id:
-                                    logger.warning(
-                                        "dropping continue message for wrong session_id: "
-                                        "got %r expected %r",
-                                        continue_payload.get("session_id"),
-                                        session_id,
-                                    )
-                                    continue
-                                got_continue = True
-                                break
-                    finally:
+
+                    got_continue = False
+                    async with redis_client.pubsub() as pubsub:
+                        await pubsub.subscribe(continue_channel)
                         try:
-                            await pubsub.unsubscribe(continue_channel)
+                            deadline = (
+                                asyncio.get_running_loop().time() + CLARIFICATION_TIMEOUT_SECONDS
+                            )
+                            while asyncio.get_running_loop().time() < deadline:
+                                msg = await pubsub.get_message(
+                                    ignore_subscribe_messages=True,
+                                    timeout=PUBSUB_POLL_INTERVAL_SECONDS,
+                                )
+                                if msg and msg.get("type") == "message":
+                                    try:
+                                        continue_payload = json.loads(msg["data"])
+                                    except (TypeError, json.JSONDecodeError):
+                                        logger.warning(
+                                            "dropping non-JSON continue message: %r",
+                                            msg.get("data"),
+                                        )
+                                        continue
+                                    if not isinstance(continue_payload, dict):
+                                        logger.warning(
+                                            "dropping non-object continue message: %r",
+                                            continue_payload,
+                                        )
+                                        continue
+                                    if continue_payload.get("type") != "continue":
+                                        logger.warning(
+                                            "dropping continue message with wrong type: %r",
+                                            continue_payload.get("type"),
+                                        )
+                                        continue
+                                    if continue_payload.get("session_id") != session_id:
+                                        logger.warning(
+                                            "dropping continue for wrong session_id: "
+                                            "got %r expected %r",
+                                            continue_payload.get("session_id"),
+                                            session_id,
+                                        )
+                                        continue
+                                    got_continue = True
+                                    await redis_client.delete(f"persona:{persona_id}:clarification")
+                                    break
                         finally:
-                            await pubsub.aclose()
+                            await pubsub.unsubscribe(continue_channel)
 
                     if not got_continue:
                         persona.status = PersonaStatus.FAILED
                         persona.error_code = "CLARIFICATION_TIMEOUT"
                         await db.commit()
+                        await _publish_error(
+                            redis_client,
+                            events_channel,
+                            "CLARIFICATION_TIMEOUT",
+                            "Timed out waiting for clarification answers.",
+                        )
                         raise _NoRetry("clarification timeout")
 
                     await db.refresh(session)
                     round_prompt = ctx.build_followup_prompt(session, [], GENERATION_SYSTEM_PROMPT)
                     continue
 
+                # Unknown type — treat as bad LLM response.
                 persona.status = PersonaStatus.FAILED
                 persona.error_code = "INVALID_LLM_RESPONSE"
                 await db.commit()
+                await _publish_error(
+                    redis_client,
+                    events_channel,
+                    "INVALID_LLM_RESPONSE",
+                    f"LLM returned unknown response type: {kind!r}",
+                )
                 raise _NoRetry("unknown LLM response type")
+
             else:
+                # while…else fires when clarification_rounds > MAX_CLARIFICATION_ROUNDS.
                 persona.status = PersonaStatus.FAILED
                 persona.error_code = "MAX_ROUNDS_REACHED"
                 await db.commit()
+                await _publish_error(
+                    redis_client,
+                    events_channel,
+                    "MAX_ROUNDS_REACHED",
+                    "Maximum clarification rounds reached.",
+                )
                 raise _NoRetry("max clarification rounds")
 
+            # ----------------------------------------------------------------
+            # Parse generation response and populate persona fields.
+            # ----------------------------------------------------------------
             assert parsed is not None
             try:
                 files = parsed["files"]
@@ -277,10 +361,20 @@ async def _run_generation(
                 persona.status = PersonaStatus.FAILED
                 persona.error_code = "INVALID_LLM_RESPONSE"
                 await db.commit()
+                await _publish_error(
+                    redis_client,
+                    events_channel,
+                    "INVALID_LLM_RESPONSE",
+                    "LLM generation response was malformed.",
+                )
                 raise _NoRetry("malformed generation response") from exc
 
+            # ----------------------------------------------------------------
+            # Skill matching.
+            # ----------------------------------------------------------------
             persona.status = PersonaStatus.SKILLS_MATCHING
             await db.commit()
+
             try:
                 skills = await match_skills(
                     parsed.get("suggested_skills", []),
@@ -293,25 +387,70 @@ async def _run_generation(
                     persona_id,
                 )
                 skills = []
+            except Exception:
+                logger.exception(
+                    "match_skills raised unexpectedly for persona %s; continuing without skills",
+                    persona_id,
+                )
+                skills = []
 
             if skills:
                 for skill in skills:
                     db.add(PersonaSkill(persona_id=persona.id, skill_id=skill.id))
                 await db.commit()
 
-            persona.readme_md = build_readme(
-                {
-                    "name": persona.name,
-                    "category": persona.category,
-                    "description_summary": persona.description_summary,
-                },
-                skills,
-            )
+            try:
+                persona.readme_md = build_readme(
+                    {
+                        "name": persona.name,
+                        "category": persona.category,
+                        "description_summary": persona.description_summary,
+                    },
+                    skills,
+                )
+            except Exception:
+                logger.exception(
+                    "build_readme failed for persona %s; using empty readme", persona_id
+                )
+                persona.readme_md = ""
+
             persona.status = PersonaStatus.GENERATED
             session.status = SessionStatus.COMPLETE
             await db.commit()
+
+    except _NoRetry:
+        raise
+    except Exception:
+        logger.exception("unexpected error in _run_generation for persona %s", persona_id)
+        try:
+            async with AsyncSession(engine, expire_on_commit=False) as db_err:
+                from app.models.enums import PersonaStatus
+                from app.models.persona import Persona
+
+                persona_err = await db_err.get(Persona, uuid.UUID(persona_id))
+                if persona_err is not None and persona_err.status not in (
+                    PersonaStatus.GENERATED,
+                    PersonaStatus.PUBLISHED,
+                    PersonaStatus.FAILED,
+                ):
+                    persona_err.status = PersonaStatus.FAILED
+                    persona_err.error_code = "INTERNAL_ERROR"
+                    await db_err.commit()
+        except Exception:
+            logger.exception(
+                "also failed to mark persona %s as FAILED during error recovery",
+                persona_id,
+            )
+        await _publish_error(
+            redis_client,
+            events_channel,
+            "INTERNAL_ERROR",
+            "An unexpected error occurred during generation.",
+        )
+        raise
     finally:
         await redis_client.aclose()
+        await engine.dispose()
 
 
 @celery_app.task(bind=True, max_retries=2, default_retry_delay=5)
@@ -327,4 +466,4 @@ def generate_persona(
     except _NoRetry:
         return
     except Exception as exc:
-        raise self.retry(exc=exc) from exc
+        raise self.retry(exc=exc, countdown=5 + random.uniform(0, 3)) from exc
