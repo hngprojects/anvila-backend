@@ -500,9 +500,6 @@ async def exchange_ott(
     raw_refresh = result.raw_refresh
     user = result.user
     set_refresh_token_cookie(response, raw_refresh)
-    print()
-    print(access_token)
-    print()
     return ApiResponse[LoginData](
         message="Login successful.",
         data=LoginData(
