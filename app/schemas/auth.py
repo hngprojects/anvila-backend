@@ -92,6 +92,7 @@ class MeResponse(BaseModel):
     id: str
     email: str
     plan: str
+    display_name: str | None
     is_admin: bool
     is_super_admin: bool
     email_verified: bool
