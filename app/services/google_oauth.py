@@ -157,7 +157,6 @@ async def login_or_register_google_user(
     )
     db.add(refresh_token_record)
     await db.commit()
-    await db.flush()
 
     return access_token, raw_refresh, user
 
