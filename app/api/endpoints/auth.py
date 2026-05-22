@@ -215,6 +215,7 @@ async def me_endpoint(current_user: CurrentUser) -> ApiResponse[MeResponse]:
             plan=current_user.plan.value
             if hasattr(current_user.plan, "value")
             else current_user.plan,
+            display_name=current_user.display_name,
             is_admin=current_user.is_admin,
             is_super_admin=current_user.is_super_admin,
             email_verified=current_user.email_verified,
@@ -499,6 +500,9 @@ async def exchange_ott(
     raw_refresh = result.raw_refresh
     user = result.user
     set_refresh_token_cookie(response, raw_refresh)
+    print()
+    print(access_token)
+    print()
     return ApiResponse[LoginData](
         message="Login successful.",
         data=LoginData(

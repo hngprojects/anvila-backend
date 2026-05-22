@@ -30,7 +30,7 @@ async def explore(
     filters = [
         Persona.visibility == PersonaVisibility.PUBLIC,
         Persona.status == PersonaStatus.PUBLISHED,
-        Persona.is_listed == True,  # noqa
+        # Persona.is_listed == True,  # noqa
         Persona.deleted_at == None,  # noqa
     ]
     if search:
@@ -54,7 +54,7 @@ async def explore(
         .where(
             Persona.visibility == PersonaVisibility.PUBLIC,
             Persona.status == PersonaStatus.PUBLISHED,
-            Persona.is_listed == True,  # noqa
+            # Persona.is_listed == True,  # noqa
             Persona.deleted_at == None,  # noqa
         )
         .distinct()

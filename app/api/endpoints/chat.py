@@ -36,7 +36,7 @@ async def list_all_sessions(
         )
     )
     sessions, meta = await cursor_paginate(
-        db, query, params, ChatSession, "last_message_at", descending=True
+        db, query, params, ChatSession, "last_message_at", descending=False
     )
     summaries = await build_session_summaries(db, sessions)
 

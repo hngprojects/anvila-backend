@@ -156,6 +156,7 @@ async def login_or_register_google_user(
         ip_address=request.client.host if request.client else None,
     )
     db.add(refresh_token_record)
+    await db.commit()
     await db.flush()
 
     return access_token, raw_refresh, user
