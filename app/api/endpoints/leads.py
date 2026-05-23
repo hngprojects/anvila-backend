@@ -2,7 +2,11 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import DBSession
-from app.email.sender import send_contact_admin_notification
+from app.email.sender import (
+    send_contact_admin_notification,
+    send_contact_user_confirmation,
+    send_waitlist_confirmation,
+)
 from app.models.contact import ContactMessage
 from app.models.waitlist import WaitlistEntry
 from app.schemas.leads import (
@@ -37,7 +41,12 @@ async def submit_contact(
         entry.message,
         entry.phone,
     )
-
+    bg_task.add_task(
+        send_contact_user_confirmation,
+        entry.full_name,
+        entry.email,
+        entry.message,
+    )
     return ApiResponse(
         message="Your message has been received. We'll be in touch soon.",
         data=ContactMessageRead.model_validate(entry),
@@ -49,7 +58,7 @@ async def submit_contact(
     response_model=ApiResponse[WaitlistEntryRead],
     status_code=status.HTTP_201_CREATED,
 )
-async def join_waitlist(payload: WaitlistEntryCreate, db: DBSession):
+async def join_waitlist(payload: WaitlistEntryCreate, db: DBSession, bg_task: BackgroundTasks):
     existing = await db.scalar(select(WaitlistEntry).where(WaitlistEntry.email == payload.email))
     if existing:
         raise HTTPException(
@@ -60,7 +69,11 @@ async def join_waitlist(payload: WaitlistEntryCreate, db: DBSession):
     db.add(entry)
     await db.commit()
     await db.refresh(entry)
-
+    bg_task.add_task(
+        send_waitlist_confirmation,
+        entry.full_name,
+        entry.email,
+    )
     return ApiResponse(
         message="You're on the waitlist! We'll notify you when we launch.",
         data=WaitlistEntryRead.model_validate(entry),

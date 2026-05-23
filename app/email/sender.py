@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import sib_api_v3_sdk
@@ -19,8 +20,9 @@ _env = Environment(
 def _render(template_name: str, **ctx) -> tuple[str, str]:
     """Render a template and its plain-text block. Returns (plain, html)."""
     template = _env.get_template(template_name)
+    ctx.setdefault("current_year", datetime.now().year)
     html = template.render(**ctx)
-    plain = template.module.plain_text(**ctx)
+    plain = template.module.plain_text(**ctx)  # type: ignore
     return plain, html
 
 
@@ -81,6 +83,44 @@ def send_contact_admin_notification(
         to_email=settings.ADMIN_EMAIL,
         to_name="Admin",
         subject=f"New contact message from {full_name}",
+        html_body=html,
+        plain_body=plain,
+    )
+
+
+def send_contact_user_confirmation(
+    full_name: str,
+    email: str,
+    message: str,
+) -> None:
+    plain, html = _render(
+        "contact_confirmation.html",
+        full_name=full_name,
+        email=email,
+        message=message,
+    )
+    send_email(
+        to_email=email,
+        to_name=full_name,
+        subject="We received your message — Anvila",
+        html_body=html,
+        plain_body=plain,
+    )
+
+
+def send_waitlist_confirmation(
+    full_name: str,
+    email: str,
+) -> None:
+    plain, html = _render(
+        "waitlist_confirmation.html",
+        full_name=full_name,
+        email=email,
+    )
+    send_email(
+        to_email=email,
+        to_name=full_name,
+        subject="You're on the Anvila waitlist 🎉",
         html_body=html,
         plain_body=plain,
     )
