@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import sib_api_v3_sdk
@@ -19,8 +20,9 @@ _env = Environment(
 def _render(template_name: str, **ctx) -> tuple[str, str]:
     """Render a template and its plain-text block. Returns (plain, html)."""
     template = _env.get_template(template_name)
+    ctx.setdefault("current_year", datetime.now().year)
     html = template.render(**ctx)
-    plain = template.module.plain_text(**ctx)
+    plain = template.module.plain_text(**ctx)  # type: ignore
     return plain, html
 
 
