@@ -84,3 +84,41 @@ def send_contact_admin_notification(
         html_body=html,
         plain_body=plain,
     )
+
+
+def send_contact_user_confirmation(
+    full_name: str,
+    email: str,
+    message: str,
+) -> None:
+    plain, html = _render(
+        "contact_confirmation.html",
+        full_name=full_name,
+        email=email,
+        message=message,
+    )
+    send_email(
+        to_email=email,
+        to_name=full_name,
+        subject="We received your message — Anvila",
+        html_body=html,
+        plain_body=plain,
+    )
+
+
+def send_waitlist_confirmation(
+    full_name: str,
+    email: str,
+) -> None:
+    plain, html = _render(
+        "waitlist_confirmation.html",
+        full_name=full_name,
+        email=email,
+    )
+    send_email(
+        to_email=email,
+        to_name=full_name,
+        subject="You're on the Anvila waitlist 🎉",
+        html_body=html,
+        plain_body=plain,
+    )
