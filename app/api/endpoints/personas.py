@@ -131,11 +131,7 @@ async def generate(
         await db.commit()
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "QUEUE_UNAVAILABLE",
-                "message": "Failed to queue generation job.",
-                "exc": str(exc),
-            },
+            detail={"code": "QUEUE_UNAVAILABLE", "message": "Failed to queue generation job."},
         ) from exc
     persona.job_id = task.id
     await db.commit()
