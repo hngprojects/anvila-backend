@@ -1,7 +1,7 @@
 import asyncio
 import os
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -93,6 +93,60 @@ async def test_user(db_session: AsyncSession) -> User:
 
 
 @pytest.fixture()
+async def free_user(db_session: AsyncSession) -> User:
+    user = User(
+        email=f"free-user-{uuid.uuid4().hex[:8]}@test.local",
+        provider=UserProvider.EMAIL,
+        plan=UserPlan.FREE,
+        email_verified=True,
+        is_active=True,
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    return user
+
+
+@pytest.fixture()
+async def paid_user(db_session: AsyncSession) -> User:
+    user = User(
+        email=f"paid-user-{uuid.uuid4().hex[:8]}@test.local",
+        provider=UserProvider.EMAIL,
+        plan=UserPlan.PAID,
+        email_verified=True,
+        is_active=True,
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    return user
+
+
+@pytest.fixture()
+async def admin_user(db_session: AsyncSession) -> User:
+    user = User(
+        email=f"admin-user-{uuid.uuid4().hex[:8]}@test.local",
+        provider=UserProvider.EMAIL,
+        plan=UserPlan.FREE,
+        email_verified=True,
+        is_active=True,
+        is_admin=True,
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    return user
+
+
+@pytest.fixture()
 def auth_headers(test_user: User) -> dict[str, str]:
     token = create_access_token(str(test_user.id))
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture()
+def auth_headers_for() -> Callable[[User], dict[str, str]]:
+    def _make(user: User) -> dict[str, str]:
+        return {"Authorization": f"Bearer {create_access_token(str(user.id))}"}
+
+    return _make
