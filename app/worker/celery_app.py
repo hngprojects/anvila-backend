@@ -1,3 +1,4 @@
+import celery.schedules
 from celery import Celery
 
 from app.core.config import settings
@@ -19,4 +20,10 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    beat_schedule={
+        "purge-soft-deleted-daily": {
+            "task": "app.worker.tasks.cleanup.purge_soft_deleted",
+            "schedule": celery.schedules.crontab(hour=3, minute=0),
+        },
+    },
 )
