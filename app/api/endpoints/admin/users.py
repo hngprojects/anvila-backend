@@ -17,14 +17,15 @@ router = APIRouter(prefix="/users")
 @router.post("/upgrade", status_code=status.HTTP_200_OK)
 async def upgrade_user(body: UpgradeUserRequest, _: AdminUser, db: DBSession) -> dict:
     """Upgrade a user to paid plan while preserving the transition timestamp."""
-    result = await db.execute(select(User).where(User.id == body.user_id))
+    result = await db.execute(select(User).where(User.id == body.user_id).with_for_update())
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     if user.plan != UserPlan.PAID:
         user.plan = UserPlan.PAID
-        user.upgraded_at = datetime.now(UTC)
+        if user.upgraded_at is None:
+            user.upgraded_at = datetime.now(UTC)
         await db.commit()
         await db.refresh(user)
 
@@ -42,7 +43,7 @@ async def list_users(
     plan: UserPlan | None = Query(default=None),  # noqa: B008
 ) -> dict:
     """List users with optional plan filtering and pagination."""
-    query = select(User).order_by(User.created_at.desc())
+    query = select(User).order_by(User.created_at.desc(), User.id.desc())
     if plan is not None:
         query = query.where(User.plan == plan)
 
