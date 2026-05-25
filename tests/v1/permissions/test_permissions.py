@@ -101,3 +101,13 @@ async def test_get_current_admin_non_admin_raises() -> None:
         await get_current_admin(_user(is_admin=False))
     assert exc.value.status_code == 403
     assert exc.value.detail == "Admin access required"
+
+
+async def test_get_current_admin_admin_passes() -> None:
+    user = _user(is_admin=True, is_super_admin=False)
+    assert await get_current_admin(user) is user
+
+
+async def test_get_current_admin_super_admin_passes() -> None:
+    user = _user(is_admin=False, is_super_admin=True)
+    assert await get_current_admin(user) is user
