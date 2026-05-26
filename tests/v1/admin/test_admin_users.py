@@ -23,7 +23,7 @@ async def test_upgrade_user_sets_paid_plan(
         headers=auth_headers_for(admin_user),
     )
     assert resp.status_code == 200
-    data = resp.json()
+    data = resp.json()["data"]
     assert data["plan"] == "paid"
     assert data["upgraded_at"] is not None
     await db_session.refresh(free_user)
@@ -44,7 +44,7 @@ async def test_upgrade_user_already_paid_preserves_timestamp(
         headers=auth_headers_for(admin_user),
     )
     assert resp.status_code == 200
-    data = resp.json()
+    data = resp.json()["data"]
     assert data["plan"] == "paid"
     assert data["upgraded_at"] is None
     await db_session.refresh(paid_user)
@@ -123,11 +123,11 @@ async def test_list_users_returns_users_and_total(
 ) -> None:
     resp = await client.get(f"{BASE}/users", headers=auth_headers_for(admin_user))
     assert resp.status_code == 200
-    data = resp.json()
-    assert "users" in data
-    assert "total" in data
-    assert data["total"] >= 3
-    ids = {user["id"] for user in data["users"]}
+    body = resp.json()
+    items = body["data"]
+    total = body["meta"]["total"]
+    assert total >= 3
+    ids = {user["id"] for user in items}
     assert str(free_user.id) in ids
     assert str(paid_user.id) in ids
 
@@ -141,9 +141,9 @@ async def test_list_users_filter_free(
 ) -> None:
     resp = await client.get(f"{BASE}/users?plan=free", headers=auth_headers_for(admin_user))
     assert resp.status_code == 200
-    data = resp.json()
-    assert all(user["plan"] == "free" for user in data["users"])
-    assert str(paid_user.id) not in {user["id"] for user in data["users"]}
+    items = resp.json()["data"]
+    assert all(user["plan"] == "free" for user in items)
+    assert str(paid_user.id) not in {user["id"] for user in items}
 
 
 async def test_list_users_filter_paid(
@@ -155,8 +155,8 @@ async def test_list_users_filter_paid(
 ) -> None:
     resp = await client.get(f"{BASE}/users?plan=paid", headers=auth_headers_for(admin_user))
     assert resp.status_code == 200
-    data = resp.json()
-    assert all(user["plan"] == "paid" for user in data["users"])
+    items = resp.json()["data"]
+    assert all(user["plan"] == "paid" for user in items)
 
 
 async def test_list_users_pagination_limit(
@@ -168,7 +168,7 @@ async def test_list_users_pagination_limit(
 ) -> None:
     resp = await client.get(f"{BASE}/users?page=1&size=1", headers=auth_headers_for(admin_user))
     assert resp.status_code == 200
-    assert len(resp.json()["users"]) == 1
+    assert len(resp.json()["data"]) == 1
 
 
 async def test_list_users_pagination_offset(
@@ -182,8 +182,8 @@ async def test_list_users_pagination_offset(
     resp_p2 = await client.get(f"{BASE}/users?page=2&size=1", headers=auth_headers_for(admin_user))
     assert resp_p1.status_code == 200
     assert resp_p2.status_code == 200
-    p1_id = resp_p1.json()["users"][0]["id"]
-    p2_id = resp_p2.json()["users"][0]["id"]
+    p1_id = resp_p1.json()["data"][0]["id"]
+    p2_id = resp_p2.json()["data"][0]["id"]
     assert p1_id != p2_id
 
 

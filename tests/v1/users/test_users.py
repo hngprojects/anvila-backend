@@ -14,7 +14,7 @@ async def test_get_me_returns_correct_fields(
 ) -> None:
     resp = await client.get(f"{BASE}/me", headers=auth_headers_for(free_user))
     assert resp.status_code == 200
-    data = resp.json()
+    data = resp.json()["data"]
     assert data["id"] == str(free_user.id)
     assert data["plan"] == "free"
     assert data["generation_count"] == 0
@@ -32,7 +32,7 @@ async def test_get_me_paid_user_has_null_limit(
 ) -> None:
     resp = await client.get(f"{BASE}/me", headers=auth_headers_for(paid_user))
     assert resp.status_code == 200
-    data = resp.json()
+    data = resp.json()["data"]
     assert data["plan"] == "paid"
     assert data["generation_limit"] is None
 
