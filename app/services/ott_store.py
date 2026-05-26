@@ -1,4 +1,3 @@
-import asyncio
 import json
 import secrets
 from dataclasses import dataclass
@@ -11,7 +10,7 @@ from app.core.config import settings
 from app.schemas.auth import UserResponse
 from app.services.auth import clear_oauth_state_cookie
 
-OTT_TTL = 5
+OTT_TTL = 60
 OTT_KEY_PREFIX = "oauth:ott:"
 
 
@@ -25,11 +24,12 @@ class OTTEntry:
 def _ott_key(code: str) -> str:
     return f"{OTT_KEY_PREFIX}{code}"
 
+
 def _serialize_ott(entry: OTTEntry) -> str:
     payload = {
         "access_token": entry.access_token,
         "raw_refresh": entry.raw_refresh,
-        "user": entry.user.model_dump() if entry.user else None,
+        "user": entry.user.model_dump(mode="json") if entry.user else None,
     }
     return json.dumps(payload)
 
@@ -46,9 +46,10 @@ def _deserialize_ott(raw: str) -> OTTEntry:
         user=user,
     )
 
+
 async def create_ott(access_token: str, raw_refresh: str, user: UserResponse | None) -> str:
     code = secrets.token_urlsafe(32)
-    
+
     entry = OTTEntry(
         access_token=access_token,
         raw_refresh=raw_refresh,

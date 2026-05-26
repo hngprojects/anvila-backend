@@ -1,15 +1,15 @@
 import logging
 import logging.config
 import time
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 from app.api.router import api_router
-from app.core.config import LOGGING_CONFIG, settings
 from app.cache.redis import close_redis
+from app.core.config import LOGGING_CONFIG, settings
 
 logging.config.dictConfig(LOGGING_CONFIG)  # pyright: ignore[reportAttributeAccessIssue]
 logger = logging.getLogger(__name__)
