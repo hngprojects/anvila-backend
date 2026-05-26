@@ -1,16 +1,18 @@
 import asyncio
+import json
 import secrets
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
 from fastapi.responses import RedirectResponse
 
+from app.cache.redis import redis_client
 from app.core.config import settings
 from app.schemas.auth import UserResponse
 from app.services.auth import clear_oauth_state_cookie
 
-# TODO: use redis
-OTT_TTL = 60
+OTT_TTL = 5
+OTT_KEY_PREFIX = "oauth:ott:"
 
 
 @dataclass
@@ -20,18 +22,58 @@ class OTTEntry:
     user: UserResponse | None = None
 
 
-_store: dict[str, OTTEntry] = {}
+def _ott_key(code: str) -> str:
+    return f"{OTT_KEY_PREFIX}{code}"
 
+def _serialize_ott(entry: OTTEntry) -> str:
+    payload = {
+        "access_token": entry.access_token,
+        "raw_refresh": entry.raw_refresh,
+        "user": entry.user.model_dump() if entry.user else None,
+    }
+    return json.dumps(payload)
+
+
+def _deserialize_ott(raw: str) -> OTTEntry:
+    payload = json.loads(raw)
+
+    user_payload = payload.get("user")
+    user = UserResponse.model_validate(user_payload) if user_payload else None
+
+    return OTTEntry(
+        access_token=payload["access_token"],
+        raw_refresh=payload["raw_refresh"],
+        user=user,
+    )
 
 async def create_ott(access_token: str, raw_refresh: str, user: UserResponse | None) -> str:
     code = secrets.token_urlsafe(32)
-    _store[code] = OTTEntry(access_token=access_token, raw_refresh=raw_refresh, user=user)
-    asyncio.get_event_loop().call_later(OTT_TTL, _store.pop, code, None)
+    
+    entry = OTTEntry(
+        access_token=access_token,
+        raw_refresh=raw_refresh,
+        user=user,
+    )
+
+    await redis_client.set(
+        name=_ott_key(code),
+        value=_serialize_ott(entry),
+        ex=OTT_TTL,
+    )
+
     return code
 
 
 async def consume_ott(code: str) -> OTTEntry | None:
-    return _store.pop(code, None)
+    key = _ott_key(code)
+
+    async with redis_client.pipeline(transaction=True) as pipe:
+        raw, _ = await pipe.get(key).delete(key).execute()
+
+    if raw is None:
+        return None
+
+    return _deserialize_ott(raw)
 
 
 async def redirect_with_ott(
