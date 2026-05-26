@@ -17,15 +17,21 @@ router = APIRouter(prefix="/users")
 @router.post("/upgrade", status_code=status.HTTP_200_OK)
 async def upgrade_user(body: UpgradeUserRequest, _: AdminUser, db: DBSession) -> dict:
     """Upgrade a user to paid plan while preserving the transition timestamp."""
-    result = await db.execute(select(User).where(User.id == body.user_id).with_for_update())
+    # Cheap unlocked fetch: handles the not-found and already-PAID cases without acquiring
+    # a row lock.
+    result = await db.execute(select(User).where(User.id == body.user_id))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
     if user.plan != UserPlan.PAID:
-        user.plan = UserPlan.PAID
-        if user.upgraded_at is None:
-            user.upgraded_at = datetime.now(UTC)
+        # Re-fetch under a row lock and re-check inside the lock: serialises concurrent transitions.
+        result = await db.execute(select(User).where(User.id == body.user_id).with_for_update())
+        user = result.scalar_one_or_none()
+        if user is not None and user.plan != UserPlan.PAID:
+            user.plan = UserPlan.PAID
+            if user.upgraded_at is None:
+                user.upgraded_at = datetime.now(UTC)
         await db.commit()
         await db.refresh(user)
 
