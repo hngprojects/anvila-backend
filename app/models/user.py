@@ -100,6 +100,10 @@ class User(BaseModel):
     refine_used: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    upgraded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     # Relationships to add
     chat_sessions: Mapped[list["ChatSession"]] = relationship(
