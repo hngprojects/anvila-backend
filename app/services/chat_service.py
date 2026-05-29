@@ -9,32 +9,6 @@ from app.models.persona import Persona
 from app.schemas.chat import SessionSummary
 
 
-async def _session_to_summary(session: ChatSession, db: AsyncSession):
-    """Build a SessionSummary from a ChatSession row."""
-    persona = await db.get(Persona, session.persona_id)
-
-    # Get the last message for preview
-    result = await db.execute(
-        select(ConversationMessage)
-        .where(
-            ConversationMessage.session_id == session.id,
-        )
-        .order_by(ConversationMessage.created_at.desc())
-        .limit(1)
-    )
-    last_msg = result.scalar_one_or_none()
-    preview = last_msg.content[:100] if last_msg else None
-
-    return SessionSummary(
-        session_id=session.id,
-        persona_id=session.persona_id,
-        persona_name=persona.name if persona else None,
-        last_message_preview=preview,
-        last_message_at=session.last_message_at,
-        status=session.status,
-    )
-
-
 async def build_session_summaries(
     db: AsyncSession,
     sessions: list[ChatSession],
