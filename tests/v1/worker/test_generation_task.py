@@ -45,8 +45,8 @@ def _generation_payload() -> dict:
 def _clarification_payload(questions: list[dict] | None = None) -> dict:
     """Default clarification payload with 5 compliant questions.
 
-    Each question has id + question text; tests can override to assert
-    boundary conditions.
+    Each question has id, question text, options, and allow_custom; tests can
+    override to assert boundary conditions.
     """
     return {
         "type": "clarification",
@@ -56,35 +56,39 @@ def _clarification_payload(questions: list[dict] | None = None) -> dict:
             {
                 "id": "persona_name",
                 "question": "What name?",
-                "options": [],
+                "options": ["Suggest one for me", "I'll provide a custom name"],
                 "allow_custom": True,
             },
             {
                 "id": "personality",
                 "question": "What personality?",
-                "options": [],
+                "options": ["Professional", "Friendly", "Direct"],
                 "allow_custom": True,
             },
             {
                 "id": "behavior",
                 "question": "How should it behave?",
-                "options": [],
+                "options": ["Proactive", "Concise", "Collaborative"],
                 "allow_custom": True,
             },
             {
                 "id": "audience",
                 "question": "Who is the audience?",
-                "options": [],
+                "options": ["Internal team", "External customers", "Executives"],
                 "allow_custom": True,
             },
             {
                 "id": "output",
                 "question": "What does it output?",
-                "options": [],
+                "options": ["Markdown guidance", "Structured tasks", "Reports"],
                 "allow_custom": True,
             },
         ],
     }
+
+
+def _valid_clarification_questions() -> list[dict]:
+    return [question.copy() for question in _clarification_payload()["questions"]]
 
 
 def _patch_redis(mocker) -> MagicMock:
@@ -582,7 +586,15 @@ async def test_clarification_with_more_than_8_questions_marks_failed(
     fake_adapter,
     persona_and_session,
 ) -> None:
-    questions = [{"id": f"field_{index}", "question": f"Question {index}?"} for index in range(9)]
+    questions = [
+        {
+            "id": f"field_{index}",
+            "question": f"Question {index}?",
+            "options": ["Option A", "Option B"],
+            "allow_custom": True,
+        }
+        for index in range(9)
+    ]
     redis_client = _patch_redis(mocker)
 
     await _assert_invalid_clarification_payload(
@@ -671,6 +683,146 @@ async def test_clarification_question_missing_question_text_marks_failed(
     )
 
 
+async def test_clarification_question_id_not_snake_case_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    questions = _valid_clarification_questions()
+    questions[0]["id"] = "PersonaName"
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        _clarification_payload(questions),
+        redis_client,
+    )
+
+
+async def test_clarification_question_missing_options_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    questions = _valid_clarification_questions()
+    del questions[0]["options"]
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        _clarification_payload(questions),
+        redis_client,
+    )
+
+
+async def test_clarification_question_options_too_few_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    questions = _valid_clarification_questions()
+    questions[0]["options"] = ["only one"]
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        _clarification_payload(questions),
+        redis_client,
+    )
+
+
+async def test_clarification_question_options_too_many_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    questions = _valid_clarification_questions()
+    questions[0]["options"] = ["one", "two", "three", "four", "five"]
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        _clarification_payload(questions),
+        redis_client,
+    )
+
+
+async def test_clarification_question_options_contains_empty_string_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    questions = _valid_clarification_questions()
+    questions[0]["options"] = ["valid", ""]
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        _clarification_payload(questions),
+        redis_client,
+    )
+
+
+async def test_clarification_question_missing_allow_custom_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    questions = _valid_clarification_questions()
+    del questions[0]["allow_custom"]
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        _clarification_payload(questions),
+        redis_client,
+    )
+
+
+async def test_clarification_question_allow_custom_false_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    questions = _valid_clarification_questions()
+    questions[0]["allow_custom"] = False
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        _clarification_payload(questions),
+        redis_client,
+    )
+
+
 async def test_clarification_validator_does_not_increment_clarification_rounds(
     mocker,
     db_session: AsyncSession,
@@ -698,11 +850,17 @@ def test_generation_system_prompt_requires_5_to_8_questions() -> None:
     prompt = GENERATION_SYSTEM_PROMPT
 
     assert "Ask 5 to 8 questions per round." in prompt
-    assert "2 to 4 options each." in prompt
-    assert '"id" (snake_case)' in prompt
+    assert '"options" list of 2 to 4 short non-empty choices' in prompt
+    assert 'snake_case "id"' in prompt
     assert '"question" text' in prompt
+    assert "allow_custom" in prompt
 
     prompt_lower = prompt.lower()
     assert "persona name" in prompt_lower
     assert "personality" in prompt_lower
     assert "behavior" in prompt_lower
+    assert "role" in prompt_lower
+    assert "domain" in prompt_lower or "purpose" in prompt_lower
+    assert "audience" in prompt_lower
+    assert "skills" in prompt_lower or "tools" in prompt_lower
+    assert "output" in prompt_lower or "task expectations" in prompt_lower
