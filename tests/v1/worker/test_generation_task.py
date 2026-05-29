@@ -1,5 +1,6 @@
 import json
 import uuid
+from copy import deepcopy
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -88,7 +89,7 @@ def _clarification_payload(questions: list[dict] | None = None) -> dict:
 
 
 def _valid_clarification_questions() -> list[dict]:
-    return [question.copy() for question in _clarification_payload()["questions"]]
+    return deepcopy(_clarification_payload()["questions"])
 
 
 def _patch_redis(mocker) -> MagicMock:
@@ -864,3 +865,63 @@ def test_generation_system_prompt_requires_5_to_8_questions() -> None:
     assert "audience" in prompt_lower
     assert "skills" in prompt_lower or "tools" in prompt_lower
     assert "output" in prompt_lower or "task expectations" in prompt_lower
+
+
+async def test_clarification_question_id_starting_with_digit_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    questions = _valid_clarification_questions()
+    questions[0]["id"] = "2_factor"
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        _clarification_payload(questions),
+        redis_client,
+    )
+
+
+async def test_clarification_question_id_starting_with_underscore_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    questions = _valid_clarification_questions()
+    questions[0]["id"] = "_internal"
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        _clarification_payload(questions),
+        redis_client,
+    )
+
+
+async def test_clarification_question_id_too_long_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    questions = _valid_clarification_questions()
+    questions[0]["id"] = "a" + "_" * 64
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        _clarification_payload(questions),
+        redis_client,
+    )

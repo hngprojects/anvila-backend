@@ -31,7 +31,6 @@ import asyncio
 import json
 import logging
 import random
-import re
 import uuid
 
 from redis.asyncio import Redis
@@ -39,6 +38,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from app.schemas.personas import CLARIFY_ANSWER_ID_PATTERN
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -121,7 +121,6 @@ MAX_CLARIFICATION_ROUNDS = 5
 CLARIFICATION_TIMEOUT_SECONDS = 300.0
 PUBSUB_POLL_INTERVAL_SECONDS = 5.0
 PERSONA_FILE_COLUMNS = ("identity_md", "soul_md", "dna_md", "overview_md", "heartbeat_md")
-_SNAKE_CASE_ID = re.compile(r"^[a-z0-9_]+$")
 
 
 def _validate_clarification_payload(parsed: dict) -> list[dict]:
@@ -150,7 +149,7 @@ def _validate_clarification_payload(parsed: dict) -> list[dict]:
         question_id = question.get("id")
         if not isinstance(question_id, str) or not question_id.strip():
             raise ValueError("each question must have a non-empty id")
-        if not _SNAKE_CASE_ID.match(question_id):
+        if not CLARIFY_ANSWER_ID_PATTERN.match(question_id):
             raise ValueError("each question id must be snake_case")
 
         question_text = question.get("question")
