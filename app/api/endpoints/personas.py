@@ -197,19 +197,10 @@ async def clarify(
             },
         )
 
-    for entry in sanitized_answers:
-        db.add(
-            ConversationMessage(
-                session_id=session.id,
-                persona_id=persona.id,
-                role=MessageRole.USER,
-                content=entry["answer"],
-                round_number=session.clarification_round,
-            )
-        )
-    await db.flush()
-
-    await ContextManager().compress(session, sanitized_answers, db)
+    current_round = session.clarification_round + 1
+    await ContextManager().compress(
+        persona_id=persona_id, round_number=current_round, answers=sanitized_answers, db=db
+    )
 
     session.clarification_round += 1
     await db.commit()
