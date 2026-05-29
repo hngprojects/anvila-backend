@@ -91,7 +91,11 @@ async def generate(
     db.add(persona)
     await db.flush()
 
-    session = ChatSession(persona_id=persona.id, user_id=user.id)
+    session = ChatSession(
+        persona_id=persona.id,
+        user_id=user.id,
+        last_message_at=datetime.now(UTC),
+    )
     db.add(session)
     await db.flush()
 
