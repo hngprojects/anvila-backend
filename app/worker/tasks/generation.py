@@ -39,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.services.clarification_store import store_questions
+from app.schemas.personas import CLARIFY_ANSWER_ID_PATTERN
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -82,9 +83,11 @@ CLARIFICATION FORMAT:
     }
   ]
 }
-Ask 5 to 8 questions per round. 2 to 4 options each. Each question must
-have an "id" (snake_case) and a "question" text. Always ask about any of
-the eight fields above that are missing from <USER_INPUT> and <ANSWERS>.
+Ask 5 to 8 questions per round. Each question must have a snake_case "id",
+a "question" text, an "options" list of 2 to 4 short non-empty choices,
+and "allow_custom": true so the user can supply their own answer if none of
+the options fit. Always ask about any of the eight fields above that are
+missing from <USER_INPUT> and <ANSWERS>.
 
 GENERATION FORMAT:
 {
@@ -129,7 +132,8 @@ def _validate_clarification_payload(parsed: dict) -> list[dict]:
     Enforces:
       - "questions" present and is a list.
       - 5 <= len(questions) <= 8.
-      - Each element is a dict with non-empty "id" and "question".
+      - Each element is a dict with snake_case "id", non-empty "question",
+        2-4 non-empty string "options", and "allow_custom": true.
     """
     if "questions" not in parsed:
         raise ValueError("missing questions")
@@ -148,10 +152,23 @@ def _validate_clarification_payload(parsed: dict) -> list[dict]:
         question_id = question.get("id")
         if not isinstance(question_id, str) or not question_id.strip():
             raise ValueError("each question must have a non-empty id")
+        if not CLARIFY_ANSWER_ID_PATTERN.match(question_id):
+            raise ValueError("each question id must be snake_case")
 
         question_text = question.get("question")
         if not isinstance(question_text, str) or not question_text.strip():
             raise ValueError("each question must have non-empty question text")
+
+        options = question.get("options")
+        if not isinstance(options, list):
+            raise ValueError("each question must have an options list")
+        if not 2 <= len(options) <= 4:
+            raise ValueError("each question options length must be between 2 and 4")
+        if any(not isinstance(option, str) or not option.strip() for option in options):
+            raise ValueError("each question option must be a non-empty string")
+
+        if question.get("allow_custom") is not True:
+            raise ValueError("each question must have allow_custom set to true")
 
     return questions
 
