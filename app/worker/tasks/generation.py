@@ -49,10 +49,15 @@ AI persona. You are expert at understanding intent and building precise,
 opinionated persona specifications.
 
 EVALUATE the prompt inside <USER_INPUT> tags.
-A prompt is SUFFICIENT if it contains at minimum:
-  - The persona's role or function
-  - Its primary purpose or domain
-  - Its intended audience or use context
+A prompt is SUFFICIENT only if it contains all of:
+  - Persona name
+  - AI personality
+  - Desired behavior / interaction style
+  - Intended role or function
+  - Primary purpose or domain
+  - Target audience or user context
+  - Required skills, tools, or domains
+  - Output or task expectations
 
 If SUFFICIENT: respond with GENERATION FORMAT.
 If INSUFFICIENT and no answers provided: respond with CLARIFICATION FORMAT.
@@ -62,10 +67,23 @@ CLARIFICATION FORMAT:
 {
   "type": "clarification",
   "questions": [
-    {"id": "snake_case_id", "question": "...", "options": ["A","B","C"], "allow_custom": true}
+    {
+      "id": "persona_name",
+      "question": "What should this persona be named?",
+      "options": ["Name it for me", "I will provide a name"],
+      "allow_custom": true
+    },
+    {
+      "id": "personality",
+      "question": "What personality should this AI have?",
+      "options": ["Professional", "Friendly", "Direct"],
+      "allow_custom": true
+    }
   ]
 }
-Max 3 questions per round. 2-4 options each. Return ONLY valid JSON.
+Ask 5 to 8 questions per round. 2 to 4 options each. Each question must
+have an "id" (snake_case) and a "question" text. Always ask about any of
+the eight fields above that are missing from <USER_INPUT> and <ANSWERS>.
 
 GENERATION FORMAT:
 {
@@ -100,6 +118,39 @@ MAX_CLARIFICATION_ROUNDS = 5
 CLARIFICATION_TIMEOUT_SECONDS = 300.0
 PUBSUB_POLL_INTERVAL_SECONDS = 5.0
 PERSONA_FILE_COLUMNS = ("identity_md", "soul_md", "dna_md", "overview_md", "heartbeat_md")
+
+
+def _validate_clarification_payload(parsed: dict) -> list[dict]:
+    """Return the validated list of question objects, or raise ValueError.
+
+    Enforces:
+      - "questions" present and is a list.
+      - 5 <= len(questions) <= 8.
+      - Each element is a dict with non-empty "id" and "question".
+    """
+    if "questions" not in parsed:
+        raise ValueError("missing questions")
+
+    questions = parsed["questions"]
+    if not isinstance(questions, list):
+        raise ValueError("questions must be a list")
+
+    if not 5 <= len(questions) <= 8:
+        raise ValueError("questions length must be between 5 and 8")
+
+    for question in questions:
+        if not isinstance(question, dict):
+            raise ValueError("each question must be an object")
+
+        question_id = question.get("id")
+        if not isinstance(question_id, str) or not question_id.strip():
+            raise ValueError("each question must have a non-empty id")
+
+        question_text = question.get("question")
+        if not isinstance(question_text, str) or not question_text.strip():
+            raise ValueError("each question must have non-empty question text")
+
+    return questions
 
 
 class _NoRetry(Exception):
@@ -229,6 +280,20 @@ async def _run_generation(
                     break
 
                 if kind == "clarification":
+                    try:
+                        questions = _validate_clarification_payload(parsed)
+                    except ValueError as exc:
+                        persona.status = PersonaStatus.FAILED
+                        persona.error_code = "INVALID_LLM_RESPONSE"
+                        await db.commit()
+                        await _publish_error(
+                            redis_client,
+                            events_channel,
+                            "INVALID_LLM_RESPONSE",
+                            "LLM returned an invalid clarification shape.",
+                        )
+                        raise _NoRetry("invalid clarification payload") from exc
+
                     if persona.clarification_rounds >= MAX_CLARIFICATION_ROUNDS:
                         persona.status = PersonaStatus.FAILED
                         persona.error_code = "MAX_ROUNDS_REACHED"
@@ -248,7 +313,7 @@ async def _run_generation(
                             session_id=session.id,
                             persona_id=persona.id,
                             role=MessageRole.ASSISTANT,
-                            content=json.dumps(parsed.get("questions", [])),
+                            content=json.dumps(questions),
                             round_number=persona.clarification_rounds,
                         )
                     )

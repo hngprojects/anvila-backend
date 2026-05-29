@@ -1,17 +1,18 @@
 import json
 import uuid
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.chat_session import ChatSession
-from app.models.enums import PersonaStatus, SessionStatus
+from app.models.conversation_message import ConversationMessage
+from app.models.enums import MessageRole, PersonaStatus, SessionStatus
 from app.models.persona import Persona
 from app.models.user import User
 from app.services.llm.types import LLMResponse
-from app.worker.tasks.generation import _NoRetry, _run_generation
+from app.worker.tasks.generation import GENERATION_SYSTEM_PROMPT, _NoRetry, _run_generation
 
 
 def _llm_response(content: str, tokens: int = 100) -> LLMResponse:
@@ -41,6 +42,51 @@ def _generation_payload() -> dict:
     }
 
 
+def _clarification_payload(questions: list[dict] | None = None) -> dict:
+    """Default clarification payload with 5 compliant questions.
+
+    Each question has id + question text; tests can override to assert
+    boundary conditions.
+    """
+    return {
+        "type": "clarification",
+        "questions": questions
+        if questions is not None
+        else [
+            {
+                "id": "persona_name",
+                "question": "What name?",
+                "options": [],
+                "allow_custom": True,
+            },
+            {
+                "id": "personality",
+                "question": "What personality?",
+                "options": [],
+                "allow_custom": True,
+            },
+            {
+                "id": "behavior",
+                "question": "How should it behave?",
+                "options": [],
+                "allow_custom": True,
+            },
+            {
+                "id": "audience",
+                "question": "Who is the audience?",
+                "options": [],
+                "allow_custom": True,
+            },
+            {
+                "id": "output",
+                "question": "What does it output?",
+                "options": [],
+                "allow_custom": True,
+            },
+        ],
+    }
+
+
 def _patch_redis(mocker) -> MagicMock:
     """Patch Redis.from_url so the task uses an in-memory fake. The fake's
     pubsub returns a default object whose get_message never produces a
@@ -50,10 +96,13 @@ def _patch_redis(mocker) -> MagicMock:
     fake_pubsub.unsubscribe = AsyncMock()
     fake_pubsub.aclose = AsyncMock()
     fake_pubsub.get_message = AsyncMock(return_value=None)
+    fake_pubsub.__aenter__.return_value = fake_pubsub
+    fake_pubsub.__aexit__.return_value = None
 
     fake_client = MagicMock()
     fake_client.pubsub = MagicMock(return_value=fake_pubsub)
     fake_client.publish = AsyncMock(return_value=1)
+    fake_client.delete = AsyncMock(return_value=1)
     fake_client.aclose = AsyncMock()
 
     mocker.patch(
@@ -72,6 +121,13 @@ def fake_adapter(mocker):
         return_value=adapter,
     )
     return adapter
+
+
+@pytest.fixture(autouse=True)
+def fake_match_skills(mocker):
+    matcher = AsyncMock(return_value=[])
+    mocker.patch("app.services.skill_matcher.match_skills", matcher)
+    return matcher
 
 
 @pytest.fixture()
@@ -111,14 +167,7 @@ async def test_happy_path_clarification_then_generation_then_skills_then_readme(
     )
 
     fake_adapter.generate.side_effect = [
-        _llm_response(
-            json.dumps(
-                {
-                    "type": "clarification",
-                    "questions": [{"id": "audience", "question": "who?", "options": ["a"]}],
-                }
-            )
-        ),
+        _llm_response(json.dumps(_clarification_payload())),
         _llm_response(json.dumps(_generation_payload())),
     ]
 
@@ -134,7 +183,15 @@ async def test_happy_path_clarification_then_generation_then_skills_then_readme(
     assert persona.identity_md is not None
     assert persona.readme_md is not None
     assert "# Lighthouse" in persona.readme_md
-    redis_client.publish.assert_awaited_once()
+    messages = (
+        await db_session.execute(
+            select(ConversationMessage).where(ConversationMessage.session_id == session.id)
+        )
+    ).scalars()
+    saved_message = messages.one()
+    assert saved_message.role == MessageRole.ASSISTANT
+    assert json.loads(saved_message.content) == _clarification_payload()["questions"]
+    redis_client.publish.assert_not_awaited()
 
 
 async def test_invalid_json_marks_failed_with_invalid_llm_response(
@@ -177,12 +234,13 @@ async def test_match_skills_not_implemented_is_swallowed(
     mocker,
     db_session: AsyncSession,
     fake_adapter,
+    fake_match_skills,
     persona_and_session,
 ) -> None:
     persona, session = persona_and_session
     _patch_redis(mocker)
     fake_adapter.generate.return_value = _llm_response(json.dumps(_generation_payload()))
-    # The stub already raises NotImplementedError; assert no extra patching needed.
+    fake_match_skills.side_effect = NotImplementedError
 
     await _run_generation(str(persona.id), str(session.id), "<USER_INPUT>x</USER_INPUT>", None)
 
@@ -205,9 +263,7 @@ async def test_clarification_timeout_marks_failed(
     mocker.patch("app.worker.tasks.generation.CLARIFICATION_TIMEOUT_SECONDS", 0.0)
     redis_client.pubsub.return_value.get_message = AsyncMock(return_value=None)
 
-    fake_adapter.generate.return_value = _llm_response(
-        json.dumps({"type": "clarification", "questions": []})
-    )
+    fake_adapter.generate.return_value = _llm_response(json.dumps(_clarification_payload()))
 
     with pytest.raises(_NoRetry):
         await _run_generation(str(persona.id), str(session.id), "<USER_INPUT>x</USER_INPUT>", None)
@@ -253,9 +309,7 @@ async def test_continue_payload_non_json_is_dropped(
         return_value={"type": "message", "data": b"not-json"}
     )
     mocker.patch("app.worker.tasks.generation.CLARIFICATION_TIMEOUT_SECONDS", 0.1)
-    fake_adapter.generate.return_value = _llm_response(
-        json.dumps({"type": "clarification", "questions": []})
-    )
+    fake_adapter.generate.return_value = _llm_response(json.dumps(_clarification_payload()))
 
     with pytest.raises(_NoRetry):
         await _run_generation(str(persona.id), str(session.id), "<USER_INPUT>x</USER_INPUT>", None)
@@ -276,9 +330,7 @@ async def test_continue_payload_wrong_type_is_dropped(
         return_value={"type": "message", "data": b'{"type":"clarification"}'}
     )
     mocker.patch("app.worker.tasks.generation.CLARIFICATION_TIMEOUT_SECONDS", 0.1)
-    fake_adapter.generate.return_value = _llm_response(
-        json.dumps({"type": "clarification", "questions": []})
-    )
+    fake_adapter.generate.return_value = _llm_response(json.dumps(_clarification_payload()))
 
     with pytest.raises(_NoRetry):
         await _run_generation(str(persona.id), str(session.id), "<USER_INPUT>x</USER_INPUT>", None)
@@ -302,9 +354,7 @@ async def test_continue_payload_wrong_session_id_is_dropped(
         }
     )
     mocker.patch("app.worker.tasks.generation.CLARIFICATION_TIMEOUT_SECONDS", 0.1)
-    fake_adapter.generate.return_value = _llm_response(
-        json.dumps({"type": "clarification", "questions": []})
-    )
+    fake_adapter.generate.return_value = _llm_response(json.dumps(_clarification_payload()))
 
     with pytest.raises(_NoRetry):
         await _run_generation(str(persona.id), str(session.id), "<USER_INPUT>x</USER_INPUT>", None)
@@ -327,7 +377,7 @@ async def test_continue_payload_correct_session_id_unblocks(
     )
 
     fake_adapter.generate.side_effect = [
-        _llm_response(json.dumps({"type": "clarification", "questions": []})),
+        _llm_response(json.dumps(_clarification_payload())),
         _llm_response(json.dumps(_generation_payload())),
     ]
 
@@ -351,7 +401,7 @@ async def test_five_clarification_cycles_then_generation_makes_six_llm_calls(
     )
 
     fake_adapter.generate.side_effect = [
-        _llm_response(json.dumps({"type": "clarification", "questions": []})) for _ in range(5)
+        _llm_response(json.dumps(_clarification_payload())) for _ in range(5)
     ] + [_llm_response(json.dumps(_generation_payload()))]
 
     await _run_generation(str(persona.id), str(session.id), "<USER_INPUT>x</USER_INPUT>", None)
@@ -397,9 +447,7 @@ async def test_continue_payload_non_dict_json_is_dropped(
         return_value={"type": "message", "data": b'["continue"]'}
     )
     mocker.patch("app.worker.tasks.generation.CLARIFICATION_TIMEOUT_SECONDS", 0.1)
-    fake_adapter.generate.return_value = _llm_response(
-        json.dumps({"type": "clarification", "questions": []})
-    )
+    fake_adapter.generate.return_value = _llm_response(json.dumps(_clarification_payload()))
 
     with pytest.raises(_NoRetry):
         await _run_generation(str(persona.id), str(session.id), "<USER_INPUT>x</USER_INPUT>", None)
@@ -467,3 +515,194 @@ async def test_invalid_category_marks_failed_with_invalid_llm_response(
     await db_session.refresh(persona)
     assert persona.status == PersonaStatus.FAILED
     assert persona.error_code == "INVALID_LLM_RESPONSE"
+
+
+async def _assert_invalid_clarification_payload(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session: tuple[Persona, ChatSession],
+    payload: dict,
+    redis_client: MagicMock,
+) -> None:
+    """Assert validator rejection keeps malformed clarification payloads out."""
+    persona, session = persona_and_session
+    mocker.patch("app.worker.tasks.generation.CLARIFICATION_TIMEOUT_SECONDS", 0.0)
+    fake_adapter.generate.return_value = _llm_response(json.dumps(payload))
+
+    with pytest.raises(_NoRetry):
+        await _run_generation(str(persona.id), str(session.id), "<USER_INPUT>x</USER_INPUT>", None)
+
+    await db_session.refresh(persona)
+    assert persona.status == PersonaStatus.FAILED
+    assert persona.error_code == "INVALID_LLM_RESPONSE"
+
+    assistant_messages = (
+        (
+            await db_session.execute(
+                select(ConversationMessage).where(
+                    ConversationMessage.session_id == session.id,
+                    ConversationMessage.role == MessageRole.ASSISTANT,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert assistant_messages == []
+
+    publish_calls = redis_client.publish.await_args_list
+    assert any("INVALID_LLM_RESPONSE" in str(call) for call in publish_calls), (
+        f"expected INVALID_LLM_RESPONSE publish; got {publish_calls!r}"
+    )
+
+
+async def test_clarification_with_fewer_than_5_questions_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    questions = _clarification_payload()["questions"][:4]
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        _clarification_payload(questions),
+        redis_client,
+    )
+
+
+async def test_clarification_with_more_than_8_questions_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    questions = [{"id": f"field_{index}", "question": f"Question {index}?"} for index in range(9)]
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        _clarification_payload(questions),
+        redis_client,
+    )
+
+
+async def test_clarification_with_non_list_questions_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        {"type": "clarification", "questions": "abc"},
+        redis_client,
+    )
+
+
+async def test_clarification_missing_questions_key_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        {"type": "clarification"},
+        redis_client,
+    )
+
+
+async def test_clarification_question_missing_id_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    payload = _clarification_payload()
+    del payload["questions"][0]["id"]
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        payload,
+        redis_client,
+    )
+
+
+async def test_clarification_question_missing_question_text_marks_failed(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    payload = _clarification_payload()
+    del payload["questions"][0]["question"]
+    redis_client = _patch_redis(mocker)
+
+    await _assert_invalid_clarification_payload(
+        mocker,
+        db_session,
+        fake_adapter,
+        persona_and_session,
+        payload,
+        redis_client,
+    )
+
+
+async def test_clarification_validator_does_not_increment_clarification_rounds(
+    mocker,
+    db_session: AsyncSession,
+    fake_adapter,
+    persona_and_session,
+) -> None:
+    persona, session = persona_and_session
+    persona.clarification_rounds = 2
+    await db_session.commit()
+    _patch_redis(mocker)
+    fake_adapter.generate.return_value = _llm_response(
+        json.dumps(_clarification_payload(_clarification_payload()["questions"][:4]))
+    )
+
+    with pytest.raises(_NoRetry):
+        await _run_generation(str(persona.id), str(session.id), "<USER_INPUT>x</USER_INPUT>", None)
+
+    await db_session.refresh(persona)
+    assert persona.status == PersonaStatus.FAILED
+    assert persona.error_code == "INVALID_LLM_RESPONSE"
+    assert persona.clarification_rounds == 2
+
+
+def test_generation_system_prompt_requires_5_to_8_questions() -> None:
+    prompt = GENERATION_SYSTEM_PROMPT
+
+    assert "Ask 5 to 8 questions per round." in prompt
+    assert "2 to 4 options each." in prompt
+    assert '"id" (snake_case)' in prompt
+    assert '"question" text' in prompt
+
+    prompt_lower = prompt.lower()
+    assert "persona name" in prompt_lower
+    assert "personality" in prompt_lower
+    assert "behavior" in prompt_lower
