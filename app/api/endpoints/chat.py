@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import CurrentUser, CursorPaginationParams, DBSession
 from app.core.paginator import CursorMeta, cursor_paginate
@@ -29,11 +30,11 @@ async def list_all_sessions(
     """
     query = (
         select(ChatSession)
-        .join(Persona, Persona.id == ChatSession.persona_id)
         .where(
-            Persona.user_id == user.id,
-            ChatSession.deleted_at == None,  # noqa
+            ChatSession.user_id == user.id,
+            ChatSession.deleted_at.is_(None),
         )
+        .options(selectinload(ChatSession.persona))
     )
     sessions, meta = await cursor_paginate(
         db, query, params, ChatSession, "last_message_at", descending=True
