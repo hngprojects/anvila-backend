@@ -38,8 +38,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from app.services.clarification_store import store_questions
 from app.schemas.personas import CLARIFY_ANSWER_ID_PATTERN
+from app.services.clarification_store import store_questions
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
