@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.core.paginator import PaginatedMeta
 
-_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+CLARIFY_ANSWER_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 class ClarifyAnswer(BaseModel):
@@ -17,7 +17,7 @@ class ClarifyAnswer(BaseModel):
     @field_validator("id")
     @classmethod
     def _id_must_be_snake_case(cls, v: str) -> str:
-        if not _ID_PATTERN.match(v):
+        if not CLARIFY_ANSWER_ID_PATTERN.match(v):
             raise ValueError("id must match snake_case [a-z][a-z0-9_]{0,63}")
         return v
 
