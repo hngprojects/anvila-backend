@@ -3,6 +3,7 @@ from google import genai
 from app.core.config import settings
 from app.services.llm.base import LLMAdapter
 from app.services.llm.types import LLMResponse
+from app.services.llm.utils import extract_json
 
 
 class GeminiAdapter(LLMAdapter):
@@ -16,8 +17,11 @@ class GeminiAdapter(LLMAdapter):
     async def generate(self, prompt: str) -> LLMResponse:
         response = self.client.models.generate_content(model=self._model_name, contents=prompt)
         usage = getattr(response, "usage_metadata", None)
+        raw = response.text or ""
+        content = extract_json(raw)
+        content = extract_json(response.text or "")
         return LLMResponse(
-            content=response.text or "",
+            content=content,
             input_tokens=getattr(usage, "prompt_token_count", 0),
             output_tokens=getattr(usage, "candidates_token_count", 0),
             total_tokens=getattr(usage, "total_token_count", 0),
