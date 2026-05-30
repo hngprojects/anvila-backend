@@ -20,8 +20,7 @@ _env = Environment(
 def _render(template_name: str, **ctx) -> tuple[str, str]:
     """Render a template and its plain-text block. Returns (plain, html)."""
     template = _env.get_template(template_name)
-    ctx.setdefault("current_year", datetime.now().year)
-    html = template.render(**ctx)
+    html = template.render(**ctx, current_year=datetime.now().year)
     plain = template.module.plain_text(**ctx)  # type: ignore
     return plain, html
 

@@ -1,89 +1,61 @@
-import uuid
-
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.chat_session import ChatSession
 from app.models.conversation_message import ConversationMessage
-from app.models.persona import Persona
 from app.schemas.chat import SessionSummary
-
-
-async def _session_to_summary(session: ChatSession, db: AsyncSession):
-    """Build a SessionSummary from a ChatSession row."""
-    persona = await db.get(Persona, session.persona_id)
-
-    # Get the last message for preview
-    result = await db.execute(
-        select(ConversationMessage)
-        .where(
-            ConversationMessage.session_id == session.id,
-        )
-        .order_by(ConversationMessage.created_at.desc())
-        .limit(1)
-    )
-    last_msg = result.scalar_one_or_none()
-    preview = last_msg.content[:100] if last_msg else None
-
-    return SessionSummary(
-        session_id=session.id,
-        persona_id=session.persona_id,
-        persona_name=persona.name if persona else None,
-        last_message_preview=preview,
-        last_message_at=session.last_message_at,
-        status=session.status,
-    )
 
 
 async def build_session_summaries(
     db: AsyncSession,
     sessions: list[ChatSession],
 ) -> list[SessionSummary]:
-    """
-    Batch-build summaries for a page of sessions.
-    Total DB round-trips: 3 (sessions already fetched + personas + last messages).
-    """
     if not sessions:
         return []
 
     session_ids = [s.id for s in sessions]
-    persona_ids = list({s.persona_id for s in sessions if s.persona_id})
-
-    persona_map: dict[uuid.UUID, Persona] = {}
-    if persona_ids:
-        result = await db.execute(select(Persona).where(Persona.id.in_(persona_ids)))
-        persona_map = {p.id: p for p in result.scalars().all()}
-
-    msg = ConversationMessage
-    rn = (
-        func.row_number()
-        .over(
-            partition_by=msg.session_id,
-            order_by=msg.created_at.desc(),
+    max_dt_subq = (
+        select(
+            ConversationMessage.session_id,
+            func.max(ConversationMessage.created_at).label("max_dt"),
         )
-        .label("rn")
+        .where(ConversationMessage.session_id.in_(session_ids))
+        .group_by(ConversationMessage.session_id)
+        .subquery()
     )
 
-    subq = select(msg.session_id, msg.content, rn).where(msg.session_id.in_(session_ids)).subquery()
-
-    last_msg_result = await db.execute(
-        select(subq.c.session_id, subq.c.content).where(subq.c.rn == 1)
+    last_msg_stmt = select(ConversationMessage).join(
+        max_dt_subq,
+        and_(
+            ConversationMessage.session_id == max_dt_subq.c.session_id,
+            ConversationMessage.created_at == max_dt_subq.c.max_dt,
+        ),
     )
-    preview_map = {
-        row.session_id: row.content[:100] if row.content else None for row in last_msg_result.all()
-    }
+    last_msgs = await db.scalars(last_msg_stmt)
+    last_msg_map = {msg.session_id: msg for msg in last_msgs.all()}
 
     summaries = []
     for session in sessions:
-        persona = persona_map.get(session.persona_id)
+        persona = session.persona
+        last_msg = last_msg_map.get(session.id)
+
+        preview = None
+        if last_msg and last_msg.content:
+            preview = last_msg.content[:120]
+            # title = preview[:40] + "…" if len(preview) > 40 else preview
+        else:
+            pass
+            # title = "New Chat"
+
         summaries.append(
             SessionSummary(
                 session_id=session.id,
                 persona_id=session.persona_id,
-                persona_name=persona.name if persona else None,
-                last_message_preview=preview_map.get(session.id),
+                persona_name=persona.name if persona else "Unknown",
+                last_message_preview=preview,
                 last_message_at=session.last_message_at,
                 status=session.status,
             )
         )
+
     return summaries
