@@ -10,6 +10,12 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Defensive caps for zip extraction. Real skills today are well under 1 MiB
+# total; anything over is more likely pathological than legitimate. Tunable
+# here if real-world skills grow.
+_MAX_SKILL_FILE_SIZE = 1 * 1024 * 1024  # 1 MiB per file
+_MAX_SKILL_TOTAL_SIZE = 10 * 1024 * 1024  # 10 MiB cumulative
+
 
 async def list_openclaw_skills(
     category: str | None = None, limit: int | None = None
@@ -112,10 +118,31 @@ async def download_openclaw_skill_zip(slug: str) -> list[dict[str, str]]:
     try:
         with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
             files: list[dict[str, str]] = []
+            total_size = 0
 
             for info in zf.infolist():
                 if info.is_dir():
                     continue
+
+                if info.file_size > _MAX_SKILL_FILE_SIZE:
+                    logger.warning(
+                        "skipping oversized file %s (%d bytes) in skill %s",
+                        info.filename,
+                        info.file_size,
+                        slug,
+                    )
+                    continue
+
+                if total_size + info.file_size > _MAX_SKILL_TOTAL_SIZE:
+                    logger.warning(
+                        "skill %s exceeds cumulative size cap (%d MiB), truncating after %d files",
+                        slug,
+                        _MAX_SKILL_TOTAL_SIZE // (1024 * 1024),
+                        len(files),
+                    )
+                    break
+
+                total_size += info.file_size
 
                 try:
                     raw = zf.read(info.filename)

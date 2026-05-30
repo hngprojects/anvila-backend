@@ -201,6 +201,46 @@ async def test_download_openclaw_skill_zip_skips_binary_files(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_download_openclaw_skill_zip_skips_files_over_per_file_cap(monkeypatch):
+    async def mock_get(self, url, params=None):
+        return httpx.Response(
+            200,
+            content=_zip_bytes(
+                {
+                    "large.md": "x" * ((1 * 1024 * 1024) + 1),
+                    "small.md": "small",
+                }
+            ),
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    result = await download_openclaw_skill_zip("oversized-skill")
+
+    assert result == [{"path": "small.md", "content": "small"}]
+
+
+@pytest.mark.asyncio
+async def test_download_openclaw_skill_zip_truncates_when_total_exceeds_cap(
+    monkeypatch,
+):
+    async def mock_get(self, url, params=None):
+        return httpx.Response(
+            200,
+            content=_zip_bytes({f"file-{idx:02}.md": "x" * (1 * 1024 * 1024) for idx in range(12)}),
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    result = await download_openclaw_skill_zip("large-folder-skill")
+
+    assert len(result) < 12
+    assert all(entry["content"] for entry in result)
+
+
+@pytest.mark.asyncio
 async def test_download_openclaw_skill_zip_skips_directory_entries(monkeypatch):
     async def mock_get(self, url, params=None):
         return httpx.Response(
@@ -359,6 +399,76 @@ async def test_upsert_falls_back_to_legacy_fetch_when_zip_lacks_skill_md(
 
     assert saved.content == "# Legacy Skill\nFrom file endpoint."
     assert saved.files == [{"path": "prompt.md", "content": "Prompt only"}]
+
+
+def test_extract_skill_md_matches_basename_not_endswith():
+    files = [
+        {"path": "my-skill.md", "content": "sibling"},
+        {"path": "SKILL.md", "content": "canonical"},
+    ]
+
+    assert skill_matcher._extract_skill_md(files) == "canonical"
+
+
+def test_extract_skill_md_matches_nested_skill_md():
+    files = [{"path": "templates/skill.md", "content": "nested"}]
+
+    assert skill_matcher._extract_skill_md(files) == "nested"
+
+
+def test_extract_skill_md_ignores_other_md_files():
+    files = [{"path": "not-skill.md", "content": "sibling"}]
+
+    assert skill_matcher._extract_skill_md(files) == ""
+
+
+@pytest.mark.asyncio
+async def test_upsert_preserves_existing_content_when_new_fetch_returns_empty(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    original_files = [
+        {"path": "SKILL.md", "content": "# Cached Skill"},
+        {"path": "prompt.md", "content": "Prompt text"},
+    ]
+    download_results = [original_files, []]
+
+    async def mock_download(slug):
+        assert slug == "cached-skill"
+        return download_results.pop(0)
+
+    async def mock_legacy_fetch(skill_ref):
+        assert skill_ref == "cached-skill-id"
+        return ""
+
+    monkeypatch.setattr(skill_matcher, "download_openclaw_skill_zip", mock_download)
+    monkeypatch.setattr(skill_matcher, "fetch_openclaw_skill_markdown", mock_legacy_fetch)
+
+    payload = {
+        "id": "cached-skill-id",
+        "slug": "cached-skill",
+        "displayName": "Cached Skill",
+        "summary": "A cached skill.",
+    }
+
+    await skill_matcher._upsert_openclaw_skill(
+        item={"slug": "cached-skill"},
+        detail=payload,
+        category="engineering",
+        db=db_session,
+    )
+    await skill_matcher._upsert_openclaw_skill(
+        item={"slug": "cached-skill"},
+        detail=payload,
+        category="engineering",
+        db=db_session,
+    )
+
+    result = await db_session.execute(select(Skill).where(Skill.slug == "cached-skill"))
+    saved = result.scalar_one()
+
+    assert saved.content == "# Cached Skill"
+    assert saved.files == original_files
 
 
 def test_extract_list_supports_openclaw_shapes():

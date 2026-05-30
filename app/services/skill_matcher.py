@@ -1,4 +1,5 @@
 import logging
+from pathlib import PurePosixPath
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -217,9 +218,7 @@ async def _upsert_openclaw_skill(
     skill = result.scalar_one_or_none()
 
     if skill is not None:
-        for field, value in values.items():
-            setattr(skill, field, value)
-
+        _safe_update_skill(skill, values)
         await db.flush()
         return skill
 
@@ -240,17 +239,27 @@ async def _upsert_openclaw_skill(
         if existing is None:
             raise
 
-        for field, value in values.items():
-            setattr(existing, field, value)
-
+        _safe_update_skill(existing, values)
         await db.flush()
         return existing
 
 
+def _safe_update_skill(skill: Skill, values: dict[str, Any]) -> None:
+    """Update fields without clobbering cached content on empty fetches."""
+    for field, value in values.items():
+        if field in ("content", "files") and not value and getattr(skill, field):
+            continue
+        setattr(skill, field, value)
+
+
 def _extract_skill_md(files: list[dict[str, str]]) -> str:
-    """Return the content of SKILL.md from a skill file list, or empty."""
+    """Return the content of SKILL.md from a skill file list, or empty.
+
+    Matches the basename to avoid over-matching files like my-skill.md or
+    not-skill.md.
+    """
     for entry in files:
-        if entry["path"].lower().endswith("skill.md"):
+        if PurePosixPath(entry["path"]).name.lower() == "skill.md":
             return entry["content"]
 
     return ""
