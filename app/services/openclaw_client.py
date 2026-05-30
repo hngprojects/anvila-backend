@@ -1,5 +1,7 @@
+import io
 import json
 import logging
+import zipfile
 from typing import Any
 
 import httpx
@@ -93,6 +95,53 @@ async def fetch_openclaw_skill_markdown(skill_id: str) -> str:
         return ""
 
     return response.text
+
+
+async def download_openclaw_skill_zip(slug: str) -> list[dict[str, str]]:
+    """Download an OpenClaw/ClawHub skill zip and return its UTF-8 text files."""
+    url = f"{settings.OPENCLAW_API_BASE.rstrip('/')}/download"
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.get(url, params={"slug": slug})
+            response.raise_for_status()
+    except httpx.HTTPError as exc:
+        logger.warning("OpenClaw zip download failed for %s: %s", slug, exc)
+        return []
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+            files: list[dict[str, str]] = []
+
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+
+                try:
+                    raw = zf.read(info.filename)
+                    content = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    logger.warning(
+                        "skipping non-UTF-8 file %s in skill %s",
+                        info.filename,
+                        slug,
+                    )
+                    continue
+                except zipfile.BadZipFile as exc:
+                    logger.warning(
+                        "bad zip entry %s in skill %s: %s",
+                        info.filename,
+                        slug,
+                        exc,
+                    )
+                    continue
+
+                files.append({"path": info.filename, "content": content})
+
+            return files
+    except zipfile.BadZipFile as exc:
+        logger.warning("OpenClaw returned malformed zip for %s: %s", slug, exc)
+        return []
 
 
 def _extract_list(payload: Any) -> list[dict[str, Any]]:

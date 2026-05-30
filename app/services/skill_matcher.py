@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.models.enums import SkillSourceRegistry
 from app.models.skill import Skill
 from app.services.openclaw_client import (
+    download_openclaw_skill_zip,
     fetch_openclaw_skill,
     fetch_openclaw_skill_markdown,
     search_openclaw_skills,
@@ -161,11 +162,19 @@ async def _upsert_openclaw_skill(
         or item.get("name")
         or ""
     )
-    try:
-        content = await fetch_openclaw_skill_markdown(skill_ref) if skill_ref else ""
-    except Exception as exc:
-        logger.warning("OpenClaw markdown fetch failed for skill %s: %s", skill_ref, exc)
-        content = ""
+    files = await download_openclaw_skill_zip(slug)
+    content = _extract_skill_md(files)
+
+    if not content:
+        try:
+            content = await fetch_openclaw_skill_markdown(skill_ref) if skill_ref else ""
+        except Exception as exc:
+            logger.warning(
+                "OpenClaw markdown fallback fetch failed for %s: %s",
+                skill_ref,
+                exc,
+            )
+            content = ""
 
     values = {
         "name": (
@@ -179,6 +188,7 @@ async def _upsert_openclaw_skill(
             or ""
         ),
         "content": content,
+        "files": files,
         "category": detail.get("category") or item.get("category") or category,
         "tags": detail.get("tags") or item.get("tags") or [],
         "source_registry": SkillSourceRegistry.OPENCLAW,
@@ -235,6 +245,15 @@ async def _upsert_openclaw_skill(
 
         await db.flush()
         return existing
+
+
+def _extract_skill_md(files: list[dict[str, str]]) -> str:
+    """Return the content of SKILL.md from a skill file list, or empty."""
+    for entry in files:
+        if entry["path"].lower().endswith("skill.md"):
+            return entry["content"]
+
+    return ""
 
 
 async def _get_seeded_skills(
