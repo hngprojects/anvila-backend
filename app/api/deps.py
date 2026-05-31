@@ -59,7 +59,7 @@ async def get_current_admin(current_user: CurrentUser) -> User:
 
 
 def require_can_generate(user: CurrentUser) -> User:
-    if user.plan == UserPlan.FREE and user.generation_count >= 10:
+    if user.plan == UserPlan.FREE and user.generation_count >= 3:
         raise HTTPException(
             status_code=403,
             detail={
