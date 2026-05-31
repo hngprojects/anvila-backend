@@ -1,13 +1,31 @@
+import io
+import zipfile
+
 import httpx
 import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.skill import Skill
+from app.services import skill_matcher
 from app.services.openclaw_client import (
     _extract_list,
+    download_openclaw_skill_zip,
     fetch_openclaw_skill,
     fetch_openclaw_skill_markdown,
     list_openclaw_skills,
     search_openclaw_skills,
 )
+
+
+def _zip_bytes(entries: dict[str, str | bytes]) -> bytes:
+    buffer = io.BytesIO()
+
+    with zipfile.ZipFile(buffer, "w") as zf:
+        for path, content in entries.items():
+            zf.writestr(path, content)
+
+    return buffer.getvalue()
 
 
 @pytest.mark.asyncio
@@ -132,6 +150,325 @@ async def test_fetch_openclaw_skill_markdown_returns_empty_on_error(monkeypatch)
     result = await fetch_openclaw_skill_markdown("missing-skill")
 
     assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_download_openclaw_skill_zip_extracts_text_files(monkeypatch):
+    async def mock_get(self, url, params=None):
+        assert url.endswith("/download")
+        assert params == {"slug": "web-development"}
+
+        return httpx.Response(
+            200,
+            content=_zip_bytes(
+                {
+                    "SKILL.md": "# Web Development\nBuild web apps.",
+                    "prompt.md": "Use practical examples.",
+                }
+            ),
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    result = await download_openclaw_skill_zip("web-development")
+
+    assert result == [
+        {"path": "SKILL.md", "content": "# Web Development\nBuild web apps."},
+        {"path": "prompt.md", "content": "Use practical examples."},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_download_openclaw_skill_zip_skips_binary_files(monkeypatch):
+    async def mock_get(self, url, params=None):
+        return httpx.Response(
+            200,
+            content=_zip_bytes(
+                {
+                    "SKILL.md": "# Text",
+                    "asset.bin": b"\xff\xfe\xfd",
+                }
+            ),
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    result = await download_openclaw_skill_zip("mixed-skill")
+
+    assert result == [{"path": "SKILL.md", "content": "# Text"}]
+
+
+@pytest.mark.asyncio
+async def test_download_openclaw_skill_zip_skips_files_over_per_file_cap(monkeypatch):
+    async def mock_get(self, url, params=None):
+        return httpx.Response(
+            200,
+            content=_zip_bytes(
+                {
+                    "large.md": "x" * ((1 * 1024 * 1024) + 1),
+                    "small.md": "small",
+                }
+            ),
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    result = await download_openclaw_skill_zip("oversized-skill")
+
+    assert result == [{"path": "small.md", "content": "small"}]
+
+
+@pytest.mark.asyncio
+async def test_download_openclaw_skill_zip_truncates_when_total_exceeds_cap(
+    monkeypatch,
+):
+    async def mock_get(self, url, params=None):
+        return httpx.Response(
+            200,
+            content=_zip_bytes({f"file-{idx:02}.md": "x" * (1 * 1024 * 1024) for idx in range(12)}),
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    result = await download_openclaw_skill_zip("large-folder-skill")
+
+    assert len(result) < 12
+    assert all(entry["content"] for entry in result)
+
+
+@pytest.mark.asyncio
+async def test_download_openclaw_skill_zip_skips_directory_entries(monkeypatch):
+    async def mock_get(self, url, params=None):
+        return httpx.Response(
+            200,
+            content=_zip_bytes(
+                {
+                    "templates/": "",
+                    "templates/example.md": "Example",
+                }
+            ),
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    result = await download_openclaw_skill_zip("templates-skill")
+
+    assert result == [{"path": "templates/example.md", "content": "Example"}]
+
+
+@pytest.mark.asyncio
+async def test_download_openclaw_skill_zip_returns_empty_on_http_error(monkeypatch):
+    async def mock_get(self, url, params=None):
+        raise httpx.ConnectError("network failed")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    result = await download_openclaw_skill_zip("missing-skill")
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_download_openclaw_skill_zip_returns_empty_on_malformed_zip(monkeypatch):
+    async def mock_get(self, url, params=None):
+        return httpx.Response(
+            200,
+            content=b"not a zip",
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    result = await download_openclaw_skill_zip("bad-zip")
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_upsert_populates_files_column(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    files = [
+        {"path": "SKILL.md", "content": "# Folder Skill"},
+        {"path": "prompt.md", "content": "Prompt text"},
+    ]
+
+    async def mock_download(slug):
+        assert slug == "folder-skill"
+        return files
+
+    async def fail_legacy_fetch(skill_ref):
+        raise AssertionError("legacy markdown fetch should not run")
+
+    monkeypatch.setattr(skill_matcher, "download_openclaw_skill_zip", mock_download)
+    monkeypatch.setattr(skill_matcher, "fetch_openclaw_skill_markdown", fail_legacy_fetch)
+
+    await skill_matcher._upsert_openclaw_skill(
+        item={"slug": "folder-skill"},
+        detail={
+            "id": "folder-skill-id",
+            "slug": "folder-skill",
+            "displayName": "Folder Skill",
+            "summary": "A full folder skill.",
+        },
+        category="engineering",
+        db=db_session,
+    )
+
+    result = await db_session.execute(select(Skill).where(Skill.slug == "folder-skill"))
+    saved = result.scalar_one()
+
+    assert saved.content == "# Folder Skill"
+    assert saved.files == files
+
+
+@pytest.mark.asyncio
+async def test_upsert_sets_content_from_zip_skill_md(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def mock_download(slug):
+        return [
+            {"path": "templates/example.md", "content": "Example"},
+            {"path": "SKILL.md", "content": "# Zip Skill\nFrom folder."},
+        ]
+
+    async def fail_legacy_fetch(skill_ref):
+        raise AssertionError("legacy markdown fetch should not run")
+
+    monkeypatch.setattr(skill_matcher, "download_openclaw_skill_zip", mock_download)
+    monkeypatch.setattr(skill_matcher, "fetch_openclaw_skill_markdown", fail_legacy_fetch)
+
+    await skill_matcher._upsert_openclaw_skill(
+        item={"slug": "zip-skill"},
+        detail={
+            "id": "zip-skill-id",
+            "slug": "zip-skill",
+            "displayName": "Zip Skill",
+            "summary": "A zip skill.",
+        },
+        category="engineering",
+        db=db_session,
+    )
+
+    result = await db_session.execute(select(Skill).where(Skill.slug == "zip-skill"))
+    saved = result.scalar_one()
+
+    assert saved.content == "# Zip Skill\nFrom folder."
+    assert saved.files == [
+        {"path": "templates/example.md", "content": "Example"},
+        {"path": "SKILL.md", "content": "# Zip Skill\nFrom folder."},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_upsert_falls_back_to_legacy_fetch_when_zip_lacks_skill_md(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def mock_download(slug):
+        return [{"path": "prompt.md", "content": "Prompt only"}]
+
+    async def mock_legacy_fetch(skill_ref):
+        assert skill_ref == "legacy-skill-id"
+        return "# Legacy Skill\nFrom file endpoint."
+
+    monkeypatch.setattr(skill_matcher, "download_openclaw_skill_zip", mock_download)
+    monkeypatch.setattr(skill_matcher, "fetch_openclaw_skill_markdown", mock_legacy_fetch)
+
+    await skill_matcher._upsert_openclaw_skill(
+        item={"slug": "legacy-skill"},
+        detail={
+            "id": "legacy-skill-id",
+            "slug": "legacy-skill",
+            "displayName": "Legacy Skill",
+            "summary": "Needs fallback.",
+        },
+        category="engineering",
+        db=db_session,
+    )
+
+    result = await db_session.execute(select(Skill).where(Skill.slug == "legacy-skill"))
+    saved = result.scalar_one()
+
+    assert saved.content == "# Legacy Skill\nFrom file endpoint."
+    assert saved.files == [{"path": "prompt.md", "content": "Prompt only"}]
+
+
+def test_extract_skill_md_matches_basename_not_endswith():
+    files = [
+        {"path": "my-skill.md", "content": "sibling"},
+        {"path": "SKILL.md", "content": "canonical"},
+    ]
+
+    assert skill_matcher._extract_skill_md(files) == "canonical"
+
+
+def test_extract_skill_md_matches_nested_skill_md():
+    files = [{"path": "templates/skill.md", "content": "nested"}]
+
+    assert skill_matcher._extract_skill_md(files) == "nested"
+
+
+def test_extract_skill_md_ignores_other_md_files():
+    files = [{"path": "not-skill.md", "content": "sibling"}]
+
+    assert skill_matcher._extract_skill_md(files) == ""
+
+
+@pytest.mark.asyncio
+async def test_upsert_preserves_existing_content_when_new_fetch_returns_empty(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    original_files = [
+        {"path": "SKILL.md", "content": "# Cached Skill"},
+        {"path": "prompt.md", "content": "Prompt text"},
+    ]
+    download_results = [original_files, []]
+
+    async def mock_download(slug):
+        assert slug == "cached-skill"
+        return download_results.pop(0)
+
+    async def mock_legacy_fetch(skill_ref):
+        assert skill_ref == "cached-skill-id"
+        return ""
+
+    monkeypatch.setattr(skill_matcher, "download_openclaw_skill_zip", mock_download)
+    monkeypatch.setattr(skill_matcher, "fetch_openclaw_skill_markdown", mock_legacy_fetch)
+
+    payload = {
+        "id": "cached-skill-id",
+        "slug": "cached-skill",
+        "displayName": "Cached Skill",
+        "summary": "A cached skill.",
+    }
+
+    await skill_matcher._upsert_openclaw_skill(
+        item={"slug": "cached-skill"},
+        detail=payload,
+        category="engineering",
+        db=db_session,
+    )
+    await skill_matcher._upsert_openclaw_skill(
+        item={"slug": "cached-skill"},
+        detail=payload,
+        category="engineering",
+        db=db_session,
+    )
+
+    result = await db_session.execute(select(Skill).where(Skill.slug == "cached-skill"))
+    saved = result.scalar_one()
+
+    assert saved.content == "# Cached Skill"
+    assert saved.files == original_files
 
 
 def test_extract_list_supports_openclaw_shapes():
