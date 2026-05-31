@@ -1,4 +1,5 @@
 import logging
+from pathlib import PurePosixPath
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -9,6 +10,7 @@ from app.core.config import settings
 from app.models.enums import SkillSourceRegistry
 from app.models.skill import Skill
 from app.services.openclaw_client import (
+    download_openclaw_skill_zip,
     fetch_openclaw_skill,
     fetch_openclaw_skill_markdown,
     search_openclaw_skills,
@@ -161,11 +163,19 @@ async def _upsert_openclaw_skill(
         or item.get("name")
         or ""
     )
-    try:
-        content = await fetch_openclaw_skill_markdown(skill_ref) if skill_ref else ""
-    except Exception as exc:
-        logger.warning("OpenClaw markdown fetch failed for skill %s: %s", skill_ref, exc)
-        content = ""
+    files = await download_openclaw_skill_zip(slug)
+    content = _extract_skill_md(files)
+
+    if not content:
+        try:
+            content = await fetch_openclaw_skill_markdown(skill_ref) if skill_ref else ""
+        except Exception as exc:
+            logger.warning(
+                "OpenClaw markdown fallback fetch failed for %s: %s",
+                skill_ref,
+                exc,
+            )
+            content = ""
 
     values = {
         "name": (
@@ -179,6 +189,7 @@ async def _upsert_openclaw_skill(
             or ""
         ),
         "content": content,
+        "files": files,
         "category": detail.get("category") or item.get("category") or category,
         "tags": detail.get("tags") or item.get("tags") or [],
         "source_registry": SkillSourceRegistry.OPENCLAW,
@@ -207,9 +218,7 @@ async def _upsert_openclaw_skill(
     skill = result.scalar_one_or_none()
 
     if skill is not None:
-        for field, value in values.items():
-            setattr(skill, field, value)
-
+        _safe_update_skill(skill, values)
         await db.flush()
         return skill
 
@@ -230,11 +239,30 @@ async def _upsert_openclaw_skill(
         if existing is None:
             raise
 
-        for field, value in values.items():
-            setattr(existing, field, value)
-
+        _safe_update_skill(existing, values)
         await db.flush()
         return existing
+
+
+def _safe_update_skill(skill: Skill, values: dict[str, Any]) -> None:
+    """Update fields without clobbering cached content on empty fetches."""
+    for field, value in values.items():
+        if field in ("content", "files") and not value and getattr(skill, field):
+            continue
+        setattr(skill, field, value)
+
+
+def _extract_skill_md(files: list[dict[str, str]]) -> str:
+    """Return the content of SKILL.md from a skill file list, or empty.
+
+    Matches the basename to avoid over-matching files like my-skill.md or
+    not-skill.md.
+    """
+    for entry in files:
+        if PurePosixPath(entry["path"]).name.lower() == "skill.md":
+            return entry["content"]
+
+    return ""
 
 
 async def _get_seeded_skills(
