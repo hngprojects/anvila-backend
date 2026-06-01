@@ -15,7 +15,12 @@ from app.services.openclaw_client import (
     fetch_openclaw_skill_markdown,
     search_openclaw_skills,
 )
-from app.services.publish_service import create_or_get_repo, safe_skill_files, upsert_file
+from app.services.publish_service import (
+    create_or_get_repo,
+    is_safe_skill_slug,
+    safe_skill_files,
+    upsert_file,
+)
 
 SKILLS_REPO = "skills"
 
@@ -75,6 +80,15 @@ async def push_skill_to_org_repo(skill: Skill) -> None:
     <slug>/, falling back to <slug>.md for legacy single-file skills.
     """
     try:
+        if not is_safe_skill_slug(skill.slug):
+            logger.warning(
+                "skipping push of skill id=%s with unsafe slug %r "
+                "to org repo: refusing to write to GitHub",
+                skill.id,
+                skill.slug,
+            )
+            return
+
         await create_or_get_repo(
             slug=SKILLS_REPO,
             description="Shared skill library",

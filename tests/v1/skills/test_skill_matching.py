@@ -1,5 +1,6 @@
 import io
 import logging
+import uuid
 import zipfile
 from unittest.mock import AsyncMock
 
@@ -203,6 +204,41 @@ async def test_push_skill_to_org_repo_skips_when_both_files_and_content_empty(
         "skipping push of skill empty-skill to org repo: both files and content empty"
         in caplog.text
     )
+
+
+@pytest.mark.asyncio
+async def test_push_skill_to_org_repo_skips_unsafe_slug(
+    mocker,
+    caplog: pytest.LogCaptureFixture,
+):
+    caplog.set_level(logging.WARNING, logger="app.services.skill_matcher")
+    create_or_get_repo_mock = mocker.patch(
+        "app.services.skill_matcher.create_or_get_repo",
+        new=AsyncMock(return_value={}),
+    )
+    upsert_file_mock = mocker.patch(
+        "app.services.skill_matcher.upsert_file",
+        new=AsyncMock(return_value=None),
+    )
+    skill = Skill(
+        id=uuid.uuid4(),
+        name="Unsafe Skill",
+        slug="../README",
+        description="A skill with an unsafe slug.",
+        content="# Unsafe",
+        files=[{"path": "SKILL.md", "content": "# Unsafe"}],
+        category="engineering",
+        tags=[],
+        source_registry="openclaw",
+    )
+
+    await skill_matcher.push_skill_to_org_repo(skill)
+
+    create_or_get_repo_mock.assert_not_awaited()
+    upsert_file_mock.assert_not_awaited()
+    assert str(skill.id) in caplog.text
+    assert "'../README'" in caplog.text
+    assert "refusing to write to GitHub" in caplog.text
 
 
 @pytest.mark.asyncio

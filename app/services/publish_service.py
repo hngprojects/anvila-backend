@@ -59,6 +59,24 @@ def safe_skill_files(files: list[dict] | None) -> list[dict[str, str]]:
     return safe
 
 
+def is_safe_skill_slug(slug: str | None) -> bool:
+    """Return True if the slug is safe to use as a path component.
+
+    Rejects:
+      - non-strings or empty/whitespace-only strings
+      - any string containing "/", "\\", or ".."
+      - strings starting with "." (hidden-file convention; also
+        catches the degenerate case where the slug IS just "..")
+    """
+    if not isinstance(slug, str) or not slug.strip():
+        return False
+    if "/" in slug or "\\" in slug or ".." in slug:
+        return False
+    if slug.startswith("."):
+        return False
+    return True
+
+
 async def publish_persona(persona: Persona, db: AsyncSession) -> Persona:
     """
     Publish a persona to GitHub and mark it PUBLISHED.
@@ -100,6 +118,14 @@ async def publish_persona(persona: Persona, db: AsyncSession) -> Persona:
         )
 
     for skill in skills:
+        if not is_safe_skill_slug(skill.slug):
+            logger.warning(
+                "skipping skill id=%s with unsafe slug %r in publish: refusing to write to GitHub",
+                skill.id,
+                skill.slug,
+            )
+            continue
+
         safe_files = safe_skill_files(skill.files)
         if safe_files:
             for entry in safe_files:

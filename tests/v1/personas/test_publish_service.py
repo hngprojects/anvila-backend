@@ -15,7 +15,7 @@ from app.models.persona import Persona
 from app.models.persona_skill import PersonaSkill
 from app.models.skill import Skill
 from app.models.user import User
-from app.services.publish_service import publish_persona, safe_skill_files
+from app.services.publish_service import is_safe_skill_slug, publish_persona, safe_skill_files
 
 PERSONA_MARKDOWN_PATHS = {
     "README.md",
@@ -144,6 +144,30 @@ def test_safe_skill_files_returns_fresh_safe_entries_in_order() -> None:
 )
 def test_safe_skill_files_drops_unsafe_entries(files, expected) -> None:
     assert safe_skill_files(files) == expected
+
+
+@pytest.mark.parametrize(
+    ("slug", "expected"),
+    [
+        ("safe-slug", True),
+        ("snake_case_slug", True),
+        ("with-numbers-123", True),
+        ("", False),
+        ("   ", False),
+        (None, False),
+        (123, False),
+        ("../README", False),
+        ("safe/../bad", False),
+        ("foo/bar", False),
+        ("foo\\bar", False),
+        ("..hidden", False),
+        (".dotfile", False),
+        ("trailing/", False),
+        ("..", False),
+    ],
+)
+def test_is_safe_skill_slug(slug, expected) -> None:
+    assert is_safe_skill_slug(slug) is expected
 
 
 @pytest.mark.asyncio
@@ -288,6 +312,75 @@ async def test_publish_persona_skips_skill_when_both_files_and_content_empty(
     assert not any(path.startswith("skills/") for path in paths_written)
     assert upsert_file_mock.await_count == 6
     assert "skipping skill empty-skill in publish: both files and content empty" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_publish_persona_skips_skill_with_unsafe_slug(
+    db_session: AsyncSession,
+    test_user: User,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="app.services.publish_service")
+    upsert_file_mock = _mock_github(mocker)
+    skill = _make_skill(
+        "unsafe-placeholder",
+        content="# Unsafe",
+        files=[{"path": "SKILL.md", "content": "# Unsafe"}],
+    )
+    persona = await _save_persona_with_skills(db_session, test_user, [skill])
+    skill.slug = "../README"
+    await db_session.commit()
+
+    await publish_persona(persona, db_session)
+
+    paths_written = _paths_written(upsert_file_mock)
+    assert set(paths_written) == PERSONA_MARKDOWN_PATHS
+    assert not any(path.startswith("skills/") for path in paths_written)
+    assert upsert_file_mock.await_count == 6
+    assert str(skill.id) in caplog.text
+    assert "'../README'" in caplog.text
+    assert "refusing to write to GitHub" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_publish_persona_processes_safe_slugs_when_one_skill_unsafe(
+    db_session: AsyncSession,
+    test_user: User,
+    mocker,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger="app.services.publish_service")
+    upsert_file_mock = _mock_github(mocker)
+    safe_skill = _make_skill(
+        "safe-skill",
+        content="# Safe",
+        files=[{"path": "SKILL.md", "content": "# Safe"}],
+    )
+    unsafe_skill = _make_skill(
+        "unsafe-placeholder",
+        content="# Unsafe",
+        files=[{"path": "SKILL.md", "content": "# Unsafe"}],
+    )
+    persona = await _save_persona_with_skills(
+        db_session,
+        test_user,
+        [safe_skill, unsafe_skill],
+    )
+    unsafe_skill.slug = "../README"
+    await db_session.commit()
+
+    await publish_persona(persona, db_session)
+
+    paths_written = _paths_written(upsert_file_mock)
+    assert PERSONA_MARKDOWN_PATHS <= set(paths_written)
+    assert "skills/safe-skill/SKILL.md" in paths_written
+    assert "skills/../README/SKILL.md" not in paths_written
+    assert "skills/../README.md" not in paths_written
+    assert upsert_file_mock.await_count == 7
+    assert str(unsafe_skill.id) in caplog.text
+    assert "'../README'" in caplog.text
+    assert "refusing to write to GitHub" in caplog.text
 
 
 @pytest.mark.asyncio
