@@ -1,5 +1,7 @@
 import io
+import logging
 import zipfile
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -26,6 +28,181 @@ def _zip_bytes(entries: dict[str, str | bytes]) -> bytes:
             zf.writestr(path, content)
 
     return buffer.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_push_skill_to_org_repo_writes_folder_per_file_when_files_present(
+    mocker,
+):
+    mocker.patch(
+        "app.services.skill_matcher.create_or_get_repo",
+        new=AsyncMock(return_value={}),
+    )
+    upsert_file_mock = mocker.patch(
+        "app.services.skill_matcher.upsert_file",
+        new=AsyncMock(return_value=None),
+    )
+    skill = Skill(
+        name="Folder Skill",
+        slug="folder-skill",
+        description="A folder-backed skill.",
+        content="# Folder Skill",
+        files=[
+            {"path": "SKILL.md", "content": "# Folder Skill"},
+            {"path": "prompt.md", "content": "Prompt"},
+        ],
+        category="engineering",
+        tags=[],
+        source_registry="openclaw",
+    )
+
+    await skill_matcher.push_skill_to_org_repo(skill)
+
+    paths_written = [call.kwargs["path"] for call in upsert_file_mock.await_args_list]
+    assert paths_written == ["folder-skill/SKILL.md", "folder-skill/prompt.md"]
+    assert "folder-skill.md" not in paths_written
+    assert upsert_file_mock.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_push_skill_to_org_repo_falls_back_to_content_md_when_files_empty(
+    mocker,
+):
+    mocker.patch(
+        "app.services.skill_matcher.create_or_get_repo",
+        new=AsyncMock(return_value={}),
+    )
+    upsert_file_mock = mocker.patch(
+        "app.services.skill_matcher.upsert_file",
+        new=AsyncMock(return_value=None),
+    )
+    skill = Skill(
+        name="Legacy Skill",
+        slug="legacy-skill",
+        description="A legacy single-file skill.",
+        content="# Legacy",
+        files=None,
+        category="engineering",
+        tags=[],
+        source_registry="openclaw",
+    )
+
+    await skill_matcher.push_skill_to_org_repo(skill)
+
+    upsert_file_mock.assert_awaited_once_with(
+        slug=skill_matcher.SKILLS_REPO,
+        path="legacy-skill.md",
+        content="# Legacy",
+        message="chore: upsert skill legacy-skill",
+    )
+
+
+@pytest.mark.asyncio
+async def test_push_skill_to_org_repo_drops_traversal_paths_from_files(
+    mocker,
+):
+    mocker.patch(
+        "app.services.skill_matcher.create_or_get_repo",
+        new=AsyncMock(return_value={}),
+    )
+    upsert_file_mock = mocker.patch(
+        "app.services.skill_matcher.upsert_file",
+        new=AsyncMock(return_value=None),
+    )
+    skill = Skill(
+        name="Guarded Skill",
+        slug="guarded-skill",
+        description="A folder-backed skill with one unsafe entry.",
+        content="# Safe fallback",
+        files=[
+            {"path": "safe/../README.md", "content": "evil"},
+            {"path": "SKILL.md", "content": "ok"},
+        ],
+        category="engineering",
+        tags=[],
+        source_registry="openclaw",
+    )
+
+    await skill_matcher.push_skill_to_org_repo(skill)
+
+    paths_written = [call.kwargs["path"] for call in upsert_file_mock.await_args_list]
+    assert paths_written == ["guarded-skill/SKILL.md"]
+    assert "guarded-skill/safe/../README.md" not in paths_written
+    assert upsert_file_mock.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_push_skill_to_org_repo_falls_back_to_content_when_all_paths_unsafe(
+    mocker,
+):
+    mocker.patch(
+        "app.services.skill_matcher.create_or_get_repo",
+        new=AsyncMock(return_value={}),
+    )
+    upsert_file_mock = mocker.patch(
+        "app.services.skill_matcher.upsert_file",
+        new=AsyncMock(return_value=None),
+    )
+    skill = Skill(
+        name="Fallback Skill",
+        slug="fallback-skill",
+        description="A folder-backed skill with only unsafe entries.",
+        content="# Legacy fallback",
+        files=[
+            {"path": "../../README.md", "content": "x"},
+            {"path": "/absolute/bad.md", "content": "y"},
+        ],
+        category="engineering",
+        tags=[],
+        source_registry="openclaw",
+    )
+
+    await skill_matcher.push_skill_to_org_repo(skill)
+
+    upsert_file_mock.assert_awaited_once_with(
+        slug=skill_matcher.SKILLS_REPO,
+        path="fallback-skill.md",
+        content="# Legacy fallback",
+        message="chore: upsert skill fallback-skill",
+    )
+
+
+@pytest.mark.asyncio
+async def test_push_skill_to_org_repo_skips_when_both_files_and_content_empty(
+    mocker,
+    caplog: pytest.LogCaptureFixture,
+):
+    caplog.set_level(logging.WARNING, logger="app.services.skill_matcher")
+    create_or_get_repo_mock = mocker.patch(
+        "app.services.skill_matcher.create_or_get_repo",
+        new=AsyncMock(return_value={}),
+    )
+    upsert_file_mock = mocker.patch(
+        "app.services.skill_matcher.upsert_file",
+        new=AsyncMock(return_value=None),
+    )
+    skill = Skill(
+        name="Empty Skill",
+        slug="empty-skill",
+        description="An empty skill.",
+        content="",
+        files=None,
+        category="engineering",
+        tags=[],
+        source_registry="openclaw",
+    )
+
+    await skill_matcher.push_skill_to_org_repo(skill)
+
+    create_or_get_repo_mock.assert_awaited_once_with(
+        slug=skill_matcher.SKILLS_REPO,
+        description="Shared skill library",
+    )
+    upsert_file_mock.assert_not_awaited()
+    assert (
+        "skipping push of skill empty-skill to org repo: both files and content empty"
+        in caplog.text
+    )
 
 
 @pytest.mark.asyncio

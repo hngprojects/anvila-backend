@@ -15,7 +15,7 @@ from app.services.openclaw_client import (
     fetch_openclaw_skill_markdown,
     search_openclaw_skills,
 )
-from app.services.publish_service import create_or_get_repo, upsert_file
+from app.services.publish_service import create_or_get_repo, safe_skill_files, upsert_file
 
 SKILLS_REPO = "skills"
 
@@ -71,19 +71,38 @@ async def match_skills(
 
 async def push_skill_to_org_repo(skill: Skill) -> None:
     """
-    Push a skill to the shared org skills repo as <slug>.md.
+    Push a skill to the shared org skills repo as a folder under
+    <slug>/, falling back to <slug>.md for legacy single-file skills.
     """
     try:
         await create_or_get_repo(
             slug=SKILLS_REPO,
             description="Shared skill library",
         )
-        await upsert_file(
-            slug=SKILLS_REPO,
-            path=f"{skill.slug}.md",
-            content=skill.content,
-            message=f"chore: upsert skill {skill.slug}",
-        )
+
+        safe_files = safe_skill_files(skill.files)
+        if safe_files:
+            for entry in safe_files:
+                await upsert_file(
+                    slug=SKILLS_REPO,
+                    path=f"{skill.slug}/{entry['path']}",
+                    content=entry["content"],
+                    message=f"chore: upsert skill {skill.slug}/{entry['path']}",
+                )
+        elif skill.content:
+            await upsert_file(
+                slug=SKILLS_REPO,
+                path=f"{skill.slug}.md",
+                content=skill.content,
+                message=f"chore: upsert skill {skill.slug}",
+            )
+        else:
+            logger.warning(
+                "skipping push of skill %s to org repo: both files and content empty",
+                skill.slug,
+            )
+            return
+
         logger.info("pushed skill %s to org skills repo", skill.slug)
     except Exception:
         logger.exception(
