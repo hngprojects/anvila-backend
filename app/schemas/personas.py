@@ -39,11 +39,17 @@ class GenerateResponse(BaseModel):
     job_id: str
 
 
+class SkillFile(BaseModel):
+    path: str
+    content: str
+
+
 class SkillOut(BaseModel):
     slug: str
     name: str
     description: str
     tags: list[str]
+    files: list[SkillFile] = Field(default_factory=list)
 
 
 class PersonaSummary(BaseModel):
