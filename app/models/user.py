@@ -105,6 +105,9 @@ class User(BaseModel):
         nullable=True,
     )
 
+    # for invalidate all existing tokens on password change or other security events
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
     # Relationships to add
     chat_sessions: Mapped[list["ChatSession"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

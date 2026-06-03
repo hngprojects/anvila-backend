@@ -19,6 +19,11 @@ from sqlalchemy.exc import IntegrityError
 from app.api.deps import CurrentUser, DBSession
 from app.core.config import settings
 from app.core.rate_limit import limiter
+from app.core.security import (
+    create_access_token_for_user,
+    create_oauth_state_token,
+    decode_token,
+)
 from app.email.sender import (
     send_oauth_link_email,
     send_password_reset_email,
@@ -459,7 +464,7 @@ async def confirm_link(
 
         await revoke_all_active_refresh_tokens(db, user.id)
 
-        access_token = create_access_token(str(user.id))
+        access_token = create_access_token_for_user(user)
         raw_refresh = secrets.token_urlsafe(32)
         refresh_record = RefreshToken(
             token_hash=hashlib.sha256(raw_refresh.encode()).hexdigest(),

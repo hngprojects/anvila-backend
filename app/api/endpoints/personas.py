@@ -398,7 +398,7 @@ async def stream_persona(
       error         — {code, message}
     """
     # Validate token
-    payload = decode_token(token, expected_purpose="access")
+    payload = decode_token(token, expected_purpose=TokenPurpose.ACCESS)
     try:
         user_id = uuid.UUID(payload["sub"])
     except (KeyError, ValueError) as exc:
