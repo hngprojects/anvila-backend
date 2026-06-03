@@ -5,9 +5,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.router import api_router
 from app.core.config import LOGGING_CONFIG, settings
+from app.core.rate_limit import limiter, rate_limit_error_handler
 
 logging.config.dictConfig(LOGGING_CONFIG)  # pyright: ignore[reportAttributeAccessIssue]
 logger = logging.getLogger(__name__)
@@ -72,6 +75,11 @@ async def prometheus_metrics_middleware(request: Request, call_next):
             status=status,
         ).observe(duration)
 
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_error_handler)
+
+app.add_middleware(SlowAPIMiddleware)
 
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
