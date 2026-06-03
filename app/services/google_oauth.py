@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.security import create_access_token
+from app.core.security import create_access_token_for_user
 from app.models.enums import UserProvider
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
@@ -146,7 +146,7 @@ async def login_or_register_google_user(
             detail="Account is disabled",
         )
 
-    access_token = create_access_token(str(user.id))
+    access_token = create_access_token_for_user(user)
     raw_refresh = secrets.token_urlsafe(32)
     refresh_token_record = RefreshToken(
         token_hash=hashlib.sha256(raw_refresh.encode()).hexdigest(),

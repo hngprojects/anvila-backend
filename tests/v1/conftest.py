@@ -10,7 +10,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from app.core.security import create_access_token
+from app.core.security import create_access_token_for_user
 from app.db.session import get_session
 from app.main import app
 from app.models.base import Base
@@ -140,13 +140,13 @@ async def admin_user(db_session: AsyncSession) -> User:
 
 @pytest.fixture()
 def auth_headers(test_user: User) -> dict[str, str]:
-    token = create_access_token(str(test_user.id))
+    token = create_access_token_for_user(test_user)
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture()
 def auth_headers_for() -> Callable[[User], dict[str, str]]:
     def _make(user: User) -> dict[str, str]:
-        return {"Authorization": f"Bearer {create_access_token(str(user.id))}"}
+        return {"Authorization": f"Bearer {create_access_token_for_user(user)}"}
 
     return _make

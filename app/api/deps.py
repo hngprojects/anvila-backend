@@ -6,7 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.paginator import CursorParams, PageParams
-from app.core.security import decode_token
+from app.core.security import TokenPurpose, decode_token
 from app.db.session import get_session
 from app.models.enums import UserPlan
 from app.models.user import User
@@ -27,9 +27,10 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    payload = decode_token(credentials.credentials, expected_purpose="access")
+    payload = decode_token(credentials.credentials, expected_purpose=TokenPurpose.ACCESS)
     try:
         user_id = uuid.UUID(payload["sub"])
+        token_version = int(payload["version"])
     except (KeyError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -41,6 +42,12 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if token_version != user.token_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired. Please log in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
