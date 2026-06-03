@@ -258,7 +258,6 @@ async def reset_password(
     new_password: str,
 ) -> bool:
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-    print(token_hash)
     result = await db.execute(
         select(PasswordResetToken)
         .where(

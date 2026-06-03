@@ -15,7 +15,7 @@ def limiter_key_func(request: Request) -> str:
     """
     Extract rate-limit key from request.
     """
-    user = getattr(request.state, "user", None)
+    user = getattr(request.state, "current_user", None)
     if user is not None:
         return f"user:{user.id}"
 

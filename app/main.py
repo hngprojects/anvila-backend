@@ -10,6 +10,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.router import api_router
 from app.core.config import LOGGING_CONFIG, settings
+from app.core.middleware import attach_user_to_request
 from app.core.rate_limit import limiter, rate_limit_error_handler
 
 logging.config.dictConfig(LOGGING_CONFIG)  # pyright: ignore[reportAttributeAccessIssue]
@@ -81,6 +82,7 @@ app.add_exception_handler(RateLimitExceeded, rate_limit_error_handler)
 
 app.add_middleware(SlowAPIMiddleware)
 
+app.middleware("http")(attach_user_to_request)
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
 

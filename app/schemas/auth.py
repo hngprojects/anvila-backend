@@ -22,6 +22,8 @@ def sanitize_display_name(v: str) -> str:
     stripped = " ".join(stripped.split())
     if not stripped:
         raise ValueError("Display name cannot be empty or contain only markup")
+    if not (2 <= len(stripped) <= 100):
+        raise ValueError("Display name must be between 2 and 100 characters")
     return stripped
 
 
