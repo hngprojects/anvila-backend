@@ -206,7 +206,7 @@ async def forgot_password(
     raw_token = await auth_service.create_password_reset_token(db, body.email)
 
     if raw_token:
-        reset_url = f"{settings.FRONTEND_URL}/reset-password#token={raw_token}"
+        reset_url = f"{settings.FRONTEND_URL}/reset-password?token={raw_token}"
         bg_task.add_task(send_password_reset_email, body.email, reset_url)
 
     # Intentionally vague — never reveal whether the email exists or has a password account
