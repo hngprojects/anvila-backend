@@ -12,7 +12,7 @@ from starlette.responses import StreamingResponse
 from app.api.deps import CanGenerate, CurrentUser, DBSession
 from app.core.config import settings
 from app.core.paginator import PageParams, paginate
-from app.core.security import decode_token
+from app.core.security import TokenPurpose, decode_token
 from app.models.chat_session import ChatSession
 from app.models.conversation_message import ConversationMessage
 from app.models.enums import (

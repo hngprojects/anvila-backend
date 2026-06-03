@@ -6,7 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.paginator import CursorParams, PageParams
-from app.core.security import decode_token
+from app.core.security import TokenPurpose, decode_token
 from app.db.session import get_session
 from app.models.enums import UserPlan
 from app.models.user import User
