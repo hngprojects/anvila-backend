@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.security import create_access_token
+from app.core.security import create_access_token_for_user
 from app.models.enums import UserProvider
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
@@ -189,7 +189,7 @@ async def _mint_session_tokens(
     # Q9: rotate refresh tokens on every successful OAuth login.
     await revoke_all_active_refresh_tokens(db, user.id)
 
-    access_token = create_access_token(str(user.id))
+    access_token = create_access_token_for_user(user)
     raw_refresh = secrets.token_urlsafe(32)
     refresh_record = RefreshToken(
         token_hash=hashlib.sha256(raw_refresh.encode()).hexdigest(),

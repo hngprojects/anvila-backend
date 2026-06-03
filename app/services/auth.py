@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import (
-    create_access_token,
+    create_access_token_for_user,
     hash_password,
     verify_password,
 )
@@ -162,7 +162,7 @@ async def login_user(
             detail="Account is disabled",
         )
 
-    access_token = create_access_token(str(user.id))
+    access_token = create_access_token_for_user(user)
 
     raw_refresh = secrets.token_urlsafe(32)
     refresh_hash = hashlib.sha256(raw_refresh.encode()).hexdigest()
@@ -213,7 +213,7 @@ async def refresh_access_token(db: AsyncSession, raw_refresh_token: str) -> str:
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account is disabled")
 
-    return create_access_token(str(user.id))
+    return create_access_token_for_user(user)
 
 
 async def logout_user(db: AsyncSession, raw_refresh_token: str) -> None:
@@ -258,23 +258,33 @@ async def reset_password(
     new_password: str,
 ) -> bool:
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    print(token_hash)
     result = await db.execute(
         select(PasswordResetToken)
-        .where(PasswordResetToken.token_hash == token_hash)
+        .where(
+            PasswordResetToken.token_hash == token_hash,
+            PasswordResetToken.expires_at > datetime.now(UTC),
+            PasswordResetToken.used_at.is_(None),
+        )
         .with_for_update()
     )
     token_record = result.scalar_one_or_none()
 
-    if not token_record or token_record.used_at is not None:
-        return False
-    if token_record.expires_at < datetime.now(UTC):
+    if not token_record:
         return False
 
     user = await get_user_by_id(db, token_record.user_id)
     if not user or not user.password_hash:
         return False
 
+    if verify_password(new_password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from your current password.",
+        )
+
     user.password_hash = hash_password(new_password)
+    user.token_version = (user.token_version or 0) + 1  # invalidates all previous tokens
     token_record.used_at = datetime.now(UTC)
 
     # Revoke all active refresh tokens on password change
@@ -284,7 +294,7 @@ async def reset_password(
         .where(RefreshToken.revoked == False)  # noqa: E712
         .values(revoked=True)
     )
-    await db.flush()
+    await db.commit()
 
     return True
 
@@ -452,7 +462,7 @@ async def login_or_register_google_user(
             detail="Account is disabled",
         )
 
-    access_token = create_access_token(str(user.id))
+    access_token = create_access_token_for_user(user)
     raw_refresh = secrets.token_urlsafe(32)
     refresh_token_record = RefreshToken(
         token_hash=hashlib.sha256(raw_refresh.encode()).hexdigest(),
