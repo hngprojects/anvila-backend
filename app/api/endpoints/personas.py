@@ -40,7 +40,7 @@ from app.services.auth import get_user_by_id
 from app.services.context_manager import ContextManager
 from app.services.file_extractor import extract_text
 from app.services.prompt_sanitizer import PromptSanitizer
-from app.services.publish_service import publish_persona
+from app.services.publish_service import publish_persona, safe_skill_files
 from app.services.stream_service import stream_generation
 from app.worker.tasks.generation import generate_persona
 
@@ -231,7 +231,13 @@ async def _get_skills(persona_id: uuid.UUID, db: AsyncSession) -> list[SkillOut]
         .where(PersonaSkill.persona_id == persona_id)
     )
     return [
-        SkillOut(slug=s.slug, name=s.name, description=s.description, tags=s.tags or [])
+        SkillOut(
+            slug=s.slug,
+            name=s.name,
+            description=s.description,
+            tags=s.tags or [],
+            files=safe_skill_files(s.files),
+        )
         for s in result.scalars().all()
     ]
 
