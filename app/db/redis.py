@@ -17,6 +17,8 @@ def get_redis() -> Redis:
 
 async def init_redis() -> None:
     global _redis_client
+    if not settings.REDIS_URL:
+        raise RuntimeError("REDIS_URL is not configured.")
     _redis_client = from_url(
         settings.REDIS_URL,
         encoding="utf-8",

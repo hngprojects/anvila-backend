@@ -18,7 +18,7 @@ def _explore_cache_key(page: int, size: int, search: str | None, category: str |
         "endpoint": "explore",
         "page": page,
         "size": size,
-        "search": search,
+        "search": search.lower() if search else None,
         "category": category.lower() if category else None,
     }
 
@@ -103,4 +103,4 @@ async def fetch_explore(
         }
 
     cached = await explore_cache.get_or_set(cache_key, fetch, ttl=60)
-    return cached["data"], cached["meta"]
+    return ExploreResponse.model_validate(cached["data"]), cached["meta"]

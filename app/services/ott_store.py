@@ -63,7 +63,8 @@ async def consume_ott(code: str) -> OTTEntry | None:
             user=user,
         )
     except Exception:
-        logger.exception("consume_ott failed code=%s", code)
+        redacted = f"{code[:6]}..." if code else "none"
+        logger.exception("consume_ott failed code=%s", redacted)
         return None
 
 
