@@ -12,6 +12,7 @@ from app.api.router import api_router
 from app.core.config import LOGGING_CONFIG, settings
 from app.core.middleware import attach_user_to_request
 from app.core.rate_limit import limiter, rate_limit_error_handler
+from app.db.redis import close_redis, init_redis
 
 logging.config.dictConfig(LOGGING_CONFIG)  # pyright: ignore[reportAttributeAccessIssue]
 logger = logging.getLogger(__name__)
@@ -20,7 +21,13 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up the FastAPI application...")
+    try:
+        await init_redis()
+    except Exception:
+        logger.exception("Failed to connect to Redis on startup.")
+        raise
     yield
+    await close_redis()
     logger.info("Shutting down the FastAPI application...")
 
 
