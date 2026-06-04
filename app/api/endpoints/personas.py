@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
 from app.api.deps import CanGenerate, CurrentUser, DBSession
+from app.core.cache import explore_cache
 from app.core.config import settings
 from app.core.paginator import PageParams, paginate
 from app.core.security import TokenPurpose, decode_token
@@ -458,6 +459,9 @@ async def publish_persona_to_github(
 
     persona = await publish_persona(persona, db)
     await db.refresh(persona)
+
+    # invalidate explore cache after publishing
+    await explore_cache.invalidate()
 
     data = PublishPersonaResponse(
         persona_id=persona.id,
