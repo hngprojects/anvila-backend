@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: Annotated[int, Field(gt=0)] = 7
     VERIFICATION_TOKEN_EXPIRE_HOURS: Annotated[int, Field(gt=0)] = 24
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: Annotated[int, Field(gt=0)] = 60
+    DEFAULT_CACHE_TTL: int = 300  # seconds
 
     # ------------------------------------------------------------------
     # EMAIL
