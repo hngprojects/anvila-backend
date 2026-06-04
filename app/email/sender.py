@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import sib_api_v3_sdk
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -123,3 +124,32 @@ def send_waitlist_confirmation(
         html_body=html,
         plain_body=plain,
     )
+
+
+def send_gemini_key_alert(
+    recipients: list[str],
+    all_exhausted: bool,
+    ctx: dict[str, Any],
+) -> None:
+    """
+    Async alert sender injected into GeminiKeyManager.
+    """
+    subject = (
+        f"[{ctx['app_name']}] 🚨 All API Keys Exhausted — Immediate Action Required"
+        if all_exhausted
+        else f"[{ctx['app_name']}] ⚠️ API Key Rotated — {ctx['remaining_keys']} Key(s) Left"
+    )
+
+    for recipient in recipients:
+        render_ctx = {**ctx, "email": recipient}
+        try:
+            plain, html = render_template("gemini_key_alert.html", **render_ctx)
+            send_email(
+                to_email=recipient,
+                subject=subject,
+                html_body=html,
+                plain_body=plain,
+            )
+            logger.info("Key alert sent to %s", recipient)
+        except Exception:
+            logger.exception("Failed to send key alert to %s", recipient)
