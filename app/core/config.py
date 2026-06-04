@@ -102,8 +102,10 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     LLM_PROVIDER: str = "gemini"
     GEMINI_API_KEY: str | None = None
+    GEMINI_API_KEYS: list[str] = []
     GEMINI_MODEL_NAME: str = "gemini-3.5-flash"
     GEMINI_TIMEOUT_SECONDS: Annotated[int, Field(gt=0)] = 30
+    ALERT_EMAIL_RECIPIENTS: list[str] = []  # emails that should be alerted for key exhuastion
 
     @model_validator(mode="after")
     def _validate_llm_credentials(self) -> "Settings":
