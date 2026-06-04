@@ -2,11 +2,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 from redis.exceptions import LockError
 from app.core.cache import CacheNamespace, normalize_key, clear_all_cache
-
-
-async def async_iter(items):
-    for item in items:
-        yield item
+from tests.v1.conftest import async_iter
 
 
 @pytest.fixture
