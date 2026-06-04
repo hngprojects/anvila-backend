@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from google import genai
@@ -82,7 +83,11 @@ class GeminiAdapter(LLMAdapter):
             return await self._call(prompt)
 
     async def _call(self, prompt: str) -> LLMResponse:
-        response = self._client.models.generate_content(model=self._model_name, contents=prompt)
+        response = await asyncio.to_thread(
+            self._client.models.generate_content,
+            model=self._model_name,
+            contents=prompt,
+        )
         usage = getattr(response, "usage_metadata", None)
         content = extract_json(response.text or "")
         return LLMResponse(
