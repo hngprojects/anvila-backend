@@ -74,7 +74,12 @@ class _NoRetry(Exception):
 
 
 async def _publish_event(redis_client: Redis, channel: str, event_type: str, data: dict) -> None:
-    await redis_client.publish(channel, json.dumps({"type": event_type, **data}))
+    # Refine stream delivery is ephemeral; publish failures must not retry
+    # already-committed turn state.
+    try:
+        await redis_client.publish(channel, json.dumps({"type": event_type, **data}))
+    except Exception:
+        logger.exception("failed to publish refine %s event to %s", event_type, channel)
 
 
 async def _publish_error(redis_client: Redis, channel: str, code: str, message: str) -> None:

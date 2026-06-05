@@ -263,9 +263,10 @@ async def _relay_refine(
         yield _sse("start", {"persona_id": str(persona_id)})
 
         terminal_events = {"done", "complete", "error"}
-        deadline = asyncio.get_running_loop().time() + REFINE_RELAY_IDLE_TIMEOUT_SECONDS
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + REFINE_RELAY_IDLE_TIMEOUT_SECONDS
 
-        while asyncio.get_running_loop().time() < deadline:
+        while loop.time() < deadline:
             message = await pubsub.get_message(
                 ignore_subscribe_messages=True,
                 timeout=REFINE_RELAY_POLL_SECONDS,
@@ -285,6 +286,7 @@ async def _relay_refine(
                 continue
 
             yield _sse(event_type, payload)
+            deadline = loop.time() + REFINE_RELAY_IDLE_TIMEOUT_SECONDS
             if event_type in terminal_events:
                 return
 

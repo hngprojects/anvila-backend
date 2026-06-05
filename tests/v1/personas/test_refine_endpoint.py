@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.endpoints.personas import _relay_refine
 from app.models.chat_session import ChatSession
 from app.models.conversation_message import ConversationMessage
 from app.models.enums import MessageRole, PersonaCategory, PersonaStatus, UserPlan, UserProvider
@@ -300,3 +301,46 @@ async def test_relay_subscribes_before_enqueue(
 
     assert response.status_code == 200
     assert order[:2] == ["subscribe", "delay"]
+
+
+async def test_relay_idle_timeout_resets_after_delivered_event(mocker) -> None:
+    _patch_relay_redis(
+        mocker,
+        [
+            {"type": "token", "text": "still working"},
+            {"type": "done"},
+        ],
+    )
+    _patch_delay(mocker)
+    mocker.patch("app.api.endpoints.personas.REFINE_RELAY_IDLE_TIMEOUT_SECONDS", 10.0)
+
+    class FakeLoop:
+        def __init__(self) -> None:
+            self._times = iter(
+                [
+                    0.0,  # initial deadline
+                    0.0,  # first loop check
+                    9.0,  # reset after token delivery
+                    11.0,  # second loop check, beyond the original deadline
+                    12.0,  # reset after terminal delivery
+                ]
+            )
+
+        def time(self) -> float:
+            return next(self._times)
+
+    mocker.patch("app.api.endpoints.personas.asyncio.get_running_loop", return_value=FakeLoop())
+
+    chunks = [
+        chunk
+        async for chunk in _relay_refine(
+            "refine-channel",
+            uuid.uuid4(),
+            uuid.uuid4(),
+            "<USER_INPUT>Try this.</USER_INPUT>",
+        )
+    ]
+    event_headers = [chunk.split("\n", maxsplit=1)[0] for chunk in chunks]
+
+    assert event_headers == ["event: start", "event: token", "event: done"]
+    assert not any("REFINE_TIMEOUT" in chunk for chunk in chunks)

@@ -174,6 +174,42 @@ async def test_text_turn_streams_tokens_persists_assistant_and_does_not_consume_
     assert messages[0].content == "Yes, add escalation guidance."
 
 
+async def test_publish_failure_after_commit_does_not_retry_or_duplicate(
+    mocker,
+    db_session: AsyncSession,
+    test_user: User,
+) -> None:
+    persona, session = await _make_persona_with_session(db_session, test_user)
+    user_message = "<USER_INPUT>Should this persona support escalations?</USER_INPUT>"
+    await _add_current_user_message(db_session, persona, session, user_message)
+    redis_client = _patch_redis(mocker)
+    _patch_adapter(mocker, ["Yes, add escalation guidance."])
+
+    async def _publish(channel: str, payload: str) -> int:
+        event = json.loads(payload)
+        redis_client.events.append((channel, event))
+        if event["type"] == "done":
+            raise RuntimeError("redis publish failed")
+        return 1
+
+    redis_client.publish = AsyncMock(side_effect=_publish)
+
+    await _run_refine(str(persona.id), str(session.id), "refine-channel", user_message)
+
+    await db_session.refresh(persona)
+    await db_session.refresh(test_user)
+    assert persona.tokens_used == 40
+    assert test_user.total_tokens_used == 40
+    assert test_user.refine_used is False
+
+    event_types = [payload["type"] for _, payload in redis_client.events]
+    assert event_types == ["token", "done"]
+
+    messages = await _assistant_messages(db_session, session)
+    assert len(messages) == 1
+    assert messages[0].content == "Yes, add escalation guidance."
+
+
 async def test_generation_turn_replaces_skills_sets_refine_used_and_drops_published_to_generated(
     mocker,
     db_session: AsyncSession,
