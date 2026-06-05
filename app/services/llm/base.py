@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 
-from app.services.llm.types import LLMResponse
+from app.services.llm.types import LLMResponse, LLMStreamChunk
 
 
 class LLMAdapter(ABC):
@@ -27,6 +28,19 @@ class LLMAdapter(ABC):
         #
         # Raises on API failure (httpx.HTTPError or provider SDK error).
         # Caller is responsible for catching and handling the exception.
+        ...
+
+    @abstractmethod
+    def stream(self, prompt: str) -> AsyncIterator[LLMStreamChunk]:
+        # Stream the model response as incremental text deltas.
+        #
+        # Yields LLMStreamChunk(text=...) for each text delta, then a final
+        # chunk with usage populated from provider metadata.
+        #
+        # `prompt` is already sanitized/wrapped by the caller, same as
+        # generate().
+        #
+        # Raises on API failure. Caller handles exceptions.
         ...
 
     @abstractmethod

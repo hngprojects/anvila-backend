@@ -88,7 +88,14 @@ class GeminiKeyManager:
 
             # Guard: only mark if this key is actually the current one and
             # hasn't already been marked (concurrent requests may race here).
-            if current.api_key == exhausted_key and not current.exhausted:
+            if current.api_key != exhausted_key:
+                logger.debug(
+                    "Ignoring stale rotate request for non-active key (active=%s).",
+                    current.label,
+                )
+                return current.api_key
+
+            if not current.exhausted:
                 current.mark_exhausted()
                 logger.warning(
                     "Gemini key %s (%s) exhausted — rotating.",
@@ -114,7 +121,6 @@ class GeminiKeyManager:
 
     async def _dispatch_alert(self, exhausted: ManagedKey, next_key: ManagedKey | None) -> None:
         if not self._send_alert_fn or not self._recipients:
-            print("sending emails to", self._recipients)
             logger.debug("No alert function or recipients configured — skipping.")
             return
 
@@ -138,7 +144,8 @@ class GeminiKeyManager:
         }
 
         try:
-            self._send_alert_fn(
+            await asyncio.to_thread(
+                self._send_alert_fn,
                 recipients=self._recipients,
                 all_exhausted=all_exhausted,
                 ctx=ctx,
