@@ -10,6 +10,7 @@ from app.models.persona import Persona
 from app.models.persona_skill import PersonaSkill
 from app.models.skill import Skill
 from app.services.github_service import create_or_get_repo, upsert_file
+from app.services.skills.prompt_builder import build_skill_md
 from app.utils.slugify import slugify
 
 logger = logging.getLogger(__name__)
@@ -136,11 +137,21 @@ async def publish_persona(persona: Persona, db: AsyncSession) -> Persona:
                     message=f"chore: add skill {skill.slug}/{entry['path']}",
                 )
         elif skill.content:
-            # Backward compat: rows pre-Slice 1 still only have content.
+            skill_md = build_skill_md(
+                skill.slug,
+                {
+                    "displayName": skill.name,
+                    "summary": skill.description,
+                    "tags": skill.tags or [],
+                    "ownerHandle": skill.source_author or "",
+                    "url": skill.source_url or "",
+                },
+                source_url=skill.source_url or "",
+            )
             await upsert_file(
                 slug=slug,
-                path=f"skills/{skill.slug}.md",
-                content=skill.content,
+                path=f"skills/{skill.slug.split('/')[-1]}/SKILL.md",
+                content=skill_md,
                 message=f"chore: add skill {skill.slug}",
             )
         else:
