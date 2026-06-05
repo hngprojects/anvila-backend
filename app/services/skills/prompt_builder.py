@@ -1,12 +1,3 @@
-"""
-app/services/skills/prompt_builder.py
-
-Builds the install prompt stored in Skill.content and the full SKILL.md
-written to <slug>/SKILL.md in the org GitHub repo.
-"""
-
-from __future__ import annotations
-
 from typing import Any
 
 
@@ -35,7 +26,8 @@ def build_install_prompt(
         "If this skill asks you to install a third-party package or CLI, verify its source,",
         "maintainer, and package contents before running any install command.",
         "",
-        f'Install the skill "{name}"{author_part} from ClawHub{version_part} only after those checks pass.',
+        f'Install the skill "{name}"{author_part} from ClawHub{version_part}'
+        "only after those checks pass.",
     ]
 
     if page:
@@ -54,7 +46,10 @@ def build_install_prompt(
     lines += [
         "Keep the work scoped to this skill only.",
         "After install, help finish setup from verified skill metadata.",
-        "Use only the metadata you can verify from the skill page; do not invent missing requirements.",
+        (
+            "Use only the metadata you can verify from the skill page; "
+            "do not invent missing requirements."
+        ),
         "Ask before making any broader environment changes.",
     ]
 
@@ -76,11 +71,6 @@ def build_skill_md(
     prompt = build_install_prompt(slug, metadata, source_url=source_url)
     frontmatter = f"---\nname: {_yaml(name)}\ndescription: {_yaml(description)}\n---\n\n"
     return frontmatter + prompt
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _name(slug: str, metadata: dict[str, Any]) -> str:

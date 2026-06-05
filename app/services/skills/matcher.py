@@ -243,11 +243,6 @@ async def _upsert(
         return existing
 
 
-# ---------------------------------------------------------------------------
-# GitHub push
-# ---------------------------------------------------------------------------
-
-
 async def _push(slug: str, skill_md_content: str) -> None:
     """Push <slug>/SKILL.md to the org skills repo. Best-effort — never raises."""
     try:

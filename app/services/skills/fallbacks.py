@@ -1,12 +1,3 @@
-"""
-app/services/skills/fallbacks.py
-
-Hardcoded fallback skill slugs used when no match is found for a suggested
-slug. Category fallbacks are tried first, then generic fallbacks.
-"""
-
-from __future__ import annotations
-
 CATEGORY_FALLBACKS: dict[str, list[str]] = {
     "engineering": ["code-review", "debugging", "git-helper"],
     "devops": ["deployment-helper", "docker-assist", "infra-review"],
