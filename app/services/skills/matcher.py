@@ -248,9 +248,9 @@ async def _push(slug: str, skill_md_content: str) -> None:
     try:
         from app.services.github_service import create_or_get_repo, upsert_file
 
-        folder = slug.split("/")[-1]
-        if not is_safe_skill_slug(folder):
-            logger.warning("skipping GitHub push — unsafe slug: %r", folder)
+        path = slug.split("/")[-1]
+        if not is_safe_skill_slug(path):
+            logger.warning("skipping GitHub push — unsafe slug: %r", path)
             return
 
         await create_or_get_repo(
@@ -259,11 +259,11 @@ async def _push(slug: str, skill_md_content: str) -> None:
         )
         await upsert_file(
             slug=SKILLS_REPO,
-            path=f"{folder}/SKILL.md",
+            path=f"{path}.md",
             content=skill_md_content,
-            message=f"chore: upsert skill {folder}/SKILL.md",
+            message=f"chore: upsert skill {path}/SKILL.md",
         )
-        logger.info("pushed %s/SKILL.md to org repo", folder)
+        logger.info("pushed %s/SKILL.md to org repo", path)
     except Exception:
         logger.exception("GitHub push failed for skill %s — continuing", slug)
 

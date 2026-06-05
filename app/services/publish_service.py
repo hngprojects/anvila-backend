@@ -150,7 +150,7 @@ async def publish_persona(persona: Persona, db: AsyncSession) -> Persona:
             )
             await upsert_file(
                 slug=slug,
-                path=f"skills/{skill.slug.split('/')[-1]}/SKILL.md",
+                path=f"skills/{skill.slug.split('/')[-1]}.md",
                 content=skill_md,
                 message=f"chore: add skill {skill.slug}",
             )

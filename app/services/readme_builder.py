@@ -9,14 +9,15 @@ def build_readme(persona_data: dict, skills: list[Skill]) -> str:
 
     if skills:
         skill_entries = []
-        for i, skill in enumerate(skills, start=6):
+        for i, skill in enumerate(skills, start=1):
             folder = skill.slug.split("/")[-1]
             tags = ", ".join(skill.tags) if skill.tags else "general"
             entry = (
-                f"### {i}. [{skill.name}](./skills/{folder}/SKILL.md)\n"
+                f"### {i}. [{skill.name}](./skills/{folder}.md)\n"
                 f"**Tags:** {tags}\n"
                 f"> {skill.description}\n\n"
-                f"Read `./skills/{folder}/SKILL.md` for installation and activation instructions."
+                f"Load `./skills/{folder}.md` — this file contains "
+                f"instructions to install and activate this skill."
             )
             skill_entries.append(entry)
         skills_section = "\n\n".join(skill_entries)
@@ -68,8 +69,8 @@ def build_readme(persona_data: dict, skills: list[Skill]) -> str:
         "## Skills\n"
         "\n"
         "Skills are discrete capabilities you can invoke. "
-        "Each skill folder contains a SKILL.md with instructions on how to install "
-        "and activate that skill. Read the SKILL.md before attempting to use the skill.\n"
+        "Each skill file contains instructions to install and activate that capability. "
+        "Load the skill file when the task matches its description.\n"
         "\n"
         f"{skills_section}\n"
         "\n"
