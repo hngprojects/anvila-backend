@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import sib_api_v3_sdk
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -17,7 +18,7 @@ _env = Environment(
 )
 
 
-def _render(template_name: str, **ctx) -> tuple[str, str]:
+def render_template(template_name: str, **ctx) -> tuple[str, str]:
     """Render a template and its plain-text block. Returns (plain, html)."""
     template = _env.get_template(template_name)
     html = template.render(**ctx, current_year=datetime.now().year)
@@ -53,7 +54,7 @@ def send_email(
 
 
 def send_verification_email(email: str, url: str) -> None:
-    plain, html = _render(
+    plain, html = render_template(
         "verification.html",
         email=email,
         verification_url=url,
@@ -63,19 +64,19 @@ def send_verification_email(email: str, url: str) -> None:
 
 
 def send_password_reset_email(email: str, reset_url: str) -> None:
-    plain, html = _render("password_reset.html", email=email, reset_url=reset_url)
+    plain, html = render_template("password_reset.html", email=email, reset_url=reset_url)
     send_email(email, "Reset your password", html, plain)
 
 
 def send_oauth_link_email(email: str, link_url: str) -> None:
-    plain, html = _render("oauth_link.html", email=email, link_url=link_url)
+    plain, html = render_template("oauth_link.html", email=email, link_url=link_url)
     send_email(email, "Connect your GitHub account", html, plain)
 
 
 def send_contact_admin_notification(
     full_name: str, email: str, message: str, phone: str | None = None
 ) -> None:
-    plain, html = _render(
+    plain, html = render_template(
         "contact_admin.html", full_name=full_name, email=email, phone=phone, message=message
     )
     send_email(
@@ -92,7 +93,7 @@ def send_contact_user_confirmation(
     email: str,
     message: str,
 ) -> None:
-    plain, html = _render(
+    plain, html = render_template(
         "contact_confirmation.html",
         full_name=full_name,
         email=email,
@@ -111,7 +112,7 @@ def send_waitlist_confirmation(
     full_name: str,
     email: str,
 ) -> None:
-    plain, html = _render(
+    plain, html = render_template(
         "waitlist_confirmation.html",
         full_name=full_name,
         email=email,
@@ -123,3 +124,32 @@ def send_waitlist_confirmation(
         html_body=html,
         plain_body=plain,
     )
+
+
+def send_gemini_key_alert(
+    recipients: list[str],
+    all_exhausted: bool,
+    ctx: dict[str, Any],
+) -> None:
+    """
+    Async alert sender injected into GeminiKeyManager.
+    """
+    subject = (
+        f"[{ctx['app_name']}] 🚨 All API Keys Exhausted — Immediate Action Required"
+        if all_exhausted
+        else f"[{ctx['app_name']}] ⚠️ API Key Rotated — {ctx['remaining_keys']} Key(s) Left"
+    )
+
+    for recipient in recipients:
+        render_ctx = {**ctx, "email": recipient}
+        try:
+            plain, html = render_template("gemini_key_alert.html", **render_ctx)
+            send_email(
+                to_email=recipient,
+                subject=subject,
+                html_body=html,
+                plain_body=plain,
+            )
+            logger.info("Key alert sent to %s", recipient)
+        except Exception:
+            logger.exception("Failed to send key alert to %s", recipient)
