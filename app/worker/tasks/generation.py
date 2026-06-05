@@ -215,7 +215,7 @@ async def _run_generation(
     from app.services.context_manager import ContextManager
     from app.services.llm.factory import get_llm_adapter
     from app.services.readme_builder import build_readme
-    from app.services.skill_matcher import match_skills
+    from app.services.skills import match_skills
 
     adapter = get_llm_adapter()
     ctx = ContextManager()
