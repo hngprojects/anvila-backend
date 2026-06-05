@@ -18,7 +18,12 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DBSession
 from app.core.config import settings
-from app.core.security import create_access_token, create_oauth_state_token, decode_token
+from app.core.rate_limit import limiter
+from app.core.security import (
+    create_access_token_for_user,
+    create_oauth_state_token,
+    decode_token,
+)
 from app.email.sender import (
     send_oauth_link_email,
     send_password_reset_email,
@@ -78,8 +83,9 @@ _logger = logging.getLogger(__name__)
     response_model=ApiResponse[UserResponse],
     status_code=status.HTTP_201_CREATED,
 )
+@limiter.limit("5/hour")
 async def register(
-    body: RegisterRequest, db: DBSession, bg_task: BackgroundTasks
+    request: Request, body: RegisterRequest, db: DBSession, bg_task: BackgroundTasks
 ) -> ApiResponse[UserResponse]:
     try:
         user, verification_url = await auth_service.register_user(
@@ -106,6 +112,7 @@ async def register(
 
 
 @router.post("/login", response_model=ApiResponse[LoginData])
+@limiter.limit("10/minute")
 async def login(body: LoginRequest, request: Request, db: DBSession) -> ApiResponse[LoginData]:
     user_agent = request.headers.get("user-agent")
     ip_address = request.client.host if request.client else None
@@ -131,7 +138,10 @@ async def login(body: LoginRequest, request: Request, db: DBSession) -> ApiRespo
 
 
 @router.post("/verify-email", response_model=ApiResponse[UserResponse])
-async def verify_email(body: VerifyEmailRequest, db: DBSession) -> ApiResponse[UserResponse]:
+@limiter.limit("10/hour")
+async def verify_email(
+    request: Request, body: VerifyEmailRequest, db: DBSession
+) -> ApiResponse[UserResponse]:
     user = await auth_service.verify_email(db, body.token)
     await db.commit()
     await db.refresh(user)
@@ -142,9 +152,14 @@ async def verify_email(body: VerifyEmailRequest, db: DBSession) -> ApiResponse[U
     )
 
 
-@router.post("/resend-verification", response_model=ApiResponse[None])
+@router.post(
+    "/resend-verification",
+    response_model=ApiResponse[None],
+    status_code=status.HTTP_202_ACCEPTED,  # accept
+)
+@limiter.limit("3/hour")
 async def resend_verification(
-    body: ResendVerificationRequest, db: DBSession, bg_task: BackgroundTasks
+    request: Request, body: ResendVerificationRequest, db: DBSession, bg_task: BackgroundTasks
 ) -> ApiResponse[None]:
     verification_url = await auth_service.resend_verification_email(db, body.email)
 
@@ -160,7 +175,10 @@ async def resend_verification(
 
 
 @router.post("/refresh", response_model=ApiResponse[RefreshData])
-async def refresh_token_endpoint(body: RefreshRequest, db: DBSession) -> ApiResponse[RefreshData]:
+@limiter.limit("30/minute")
+async def refresh_token_endpoint(
+    request: Request, body: RefreshRequest, db: DBSession
+) -> ApiResponse[RefreshData]:
     access_token = await auth_service.refresh_access_token(db, body.refresh_token)
 
     return ApiResponse[RefreshData](
@@ -170,7 +188,10 @@ async def refresh_token_endpoint(body: RefreshRequest, db: DBSession) -> ApiResp
 
 
 @router.post("/logout", response_model=ApiResponse[None], status_code=status.HTTP_200_OK)
-async def logout_endpoint(body: LogoutRequest, db: DBSession) -> ApiResponse[None]:
+@limiter.limit("20/minute")
+async def logout_endpoint(
+    request: Request, body: LogoutRequest, db: DBSession
+) -> ApiResponse[None]:
     await auth_service.logout_user(db, body.refresh_token)
     await db.commit()
 
@@ -178,13 +199,14 @@ async def logout_endpoint(body: LogoutRequest, db: DBSession) -> ApiResponse[Non
 
 
 @router.post("/forgot-password", response_model=ApiResponse[None])
+@limiter.limit("3/hour")
 async def forgot_password(
-    body: ForgotPasswordRequest, db: DBSession, bg_task: BackgroundTasks
+    request: Request, body: ForgotPasswordRequest, db: DBSession, bg_task: BackgroundTasks
 ) -> ApiResponse[None]:
     raw_token = await auth_service.create_password_reset_token(db, body.email)
 
     if raw_token:
-        reset_url = f"{settings.FRONTEND_URL}/reset-password#token={raw_token}"
+        reset_url = f"{settings.FRONTEND_URL}/reset-password?token={raw_token}"
         bg_task.add_task(send_password_reset_email, body.email, reset_url)
 
     # Intentionally vague — never reveal whether the email exists or has a password account
@@ -194,7 +216,10 @@ async def forgot_password(
 
 
 @router.post("/reset-password", response_model=ApiResponse[None])
-async def reset_password_endpoint(body: ResetPasswordRequest, db: DBSession) -> ApiResponse[None]:
+@limiter.limit("5/hour")
+async def reset_password_endpoint(
+    request: Request, body: ResetPasswordRequest, db: DBSession
+) -> ApiResponse[None]:
     success = await auth_service.reset_password(db, body.token, body.new_password)
 
     if not success:
@@ -207,7 +232,8 @@ async def reset_password_endpoint(body: ResetPasswordRequest, db: DBSession) -> 
 
 
 @router.get("/me", response_model=ApiResponse[MeResponse])
-async def me_endpoint(current_user: CurrentUser) -> ApiResponse[MeResponse]:
+@limiter.limit("60/minute")
+async def me_endpoint(request: Request, current_user: CurrentUser) -> ApiResponse[MeResponse]:
     return ApiResponse[MeResponse](
         data=MeResponse(
             id=str(current_user.id),
@@ -438,7 +464,7 @@ async def confirm_link(
 
         await revoke_all_active_refresh_tokens(db, user.id)
 
-        access_token = create_access_token(str(user.id))
+        access_token = create_access_token_for_user(user)
         raw_refresh = secrets.token_urlsafe(32)
         refresh_record = RefreshToken(
             token_hash=hashlib.sha256(raw_refresh.encode()).hexdigest(),

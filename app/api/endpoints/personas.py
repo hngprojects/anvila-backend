@@ -10,9 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
 from app.api.deps import CanGenerate, CurrentUser, DBSession
+from app.core.cache import explore_cache
 from app.core.config import settings
 from app.core.paginator import PageParams, paginate
-from app.core.security import decode_token
+from app.core.security import TokenPurpose, decode_token
 from app.models.chat_session import ChatSession
 from app.models.conversation_message import ConversationMessage
 from app.models.enums import (
@@ -404,7 +405,7 @@ async def stream_persona(
       error         — {code, message}
     """
     # Validate token
-    payload = decode_token(token, expected_purpose="access")
+    payload = decode_token(token, expected_purpose=TokenPurpose.ACCESS)
     try:
         user_id = uuid.UUID(payload["sub"])
     except (KeyError, ValueError) as exc:
@@ -458,6 +459,9 @@ async def publish_persona_to_github(
 
     persona = await publish_persona(persona, db)
     await db.refresh(persona)
+
+    # invalidate explore cache after publishing
+    await explore_cache.invalidate()
 
     data = PublishPersonaResponse(
         persona_id=persona.id,

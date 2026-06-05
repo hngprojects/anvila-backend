@@ -26,8 +26,11 @@ class Settings(BaseSettings):
     TRUSTED_PROXIES: str = ""
     COOKIE_SECURE: bool = True
 
-    # redis
+    # ------------------------------------------------------------------
+    # Redis / cache
+    # ------------------------------------------------------------------
     REDIS_URL: str = ""
+    DEFAULT_CACHE_TTL: int = 300  # seconds
 
     # ------------------------------------------------------------------
     # JWT / tokens
