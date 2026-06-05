@@ -1,0 +1,140 @@
+{% macro plain_text(key_label, masked_key, exhausted_at, remaining_keys, total_keys, all_exhausted, next_key_label, all_keys, app_name, email) %}
+{{ app_name }} — API Key Alert
+================================
+{% if all_exhausted %}
+CRITICAL: All Gemini API keys are exhausted. Service is down.
+{% else %}
+Key rotated automatically. No immediate action needed.
+{% endif %}
+
+Exhausted key : {{ key_label }} ({{ masked_key }})
+Exhausted at  : {{ exhausted_at }}
+Keys remaining: {{ remaining_keys }} / {{ total_keys }}
+{% if not all_exhausted %}
+Now active    : {{ next_key_label }}
+{% endif %}
+
+All keys
+--------
+{% for k in all_keys %}
+  {{ k.label }}  {{ k.masked_key }}  {% if k.exhausted %}EXHAUSTED ({{ k.exhausted_at or "?" }}){% else %}ACTIVE{% endif %}
+{% endfor %}
+
+This alert was sent to {{ email }}.
+{% endmacro %}
+
+{% extends "base.html" %}
+
+{% block title %}API Key Exhausted — {{ app_name }}{% endblock %}
+
+{% block heading %}
+  {% if all_exhausted %}
+    🚨 All API Keys Exhausted
+  {% else %}
+    ⚠️ API Key Rotated
+  {% endif %}
+{% endblock %}
+
+{% block body %}
+<p style="margin:0 0 20px;color:#374151;font-size:15px;line-height:1.6;">
+  {% if all_exhausted %}
+    <strong style="color:#b91c1c;">Critical:</strong> Every configured Gemini API
+    key has been exhausted. Requests are currently failing. Immediate action is required.
+  {% else %}
+    The Gemini API key <strong>{{ key_label }}</strong> hit its quota limit and has been
+    rotated out automatically. A new key is now active.
+  {% endif %}
+</p>
+
+<!-- Key details card -->
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:24px;">
+  <tr>
+    <td style="padding:16px 20px;border-bottom:1px solid #e5e7eb;">
+      <span style="color:#6b7280;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Exhausted Key</span>
+      <p style="margin:4px 0 0;color:#111827;font-size:15px;font-weight:600;font-family:monospace;">
+        {{ key_label }} &nbsp;·&nbsp;
+        <span style="color:#6b7280;font-weight:400;">{{ masked_key }}</span>
+      </p>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:16px 20px;border-bottom:1px solid #e5e7eb;">
+      <span style="color:#6b7280;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Exhausted At</span>
+      <p style="margin:4px 0 0;color:#111827;font-size:15px;">{{ exhausted_at }}</p>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:16px 20px;">
+      <span style="color:#6b7280;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Keys Remaining</span>
+      <p style="margin:4px 0 0;font-size:15px;">
+        {% if all_exhausted %}
+          <span style="color:#b91c1c;font-weight:700;">0 / {{ total_keys }} — None available</span>
+        {% else %}
+          <span style="color:#059669;font-weight:700;">{{ remaining_keys }} / {{ total_keys }}</span>
+          &nbsp; active
+        {% endif %}
+      </p>
+    </td>
+  </tr>
+</table>
+
+{% if not all_exhausted %}
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;margin-bottom:24px;">
+  <tr>
+    <td style="padding:14px 20px;">
+      <span style="color:#065f46;font-size:14px;">
+        ✅ &nbsp;Now using <strong>{{ next_key_label }}</strong> — no action needed.
+      </span>
+    </td>
+  </tr>
+</table>
+{% else %}
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;margin-bottom:24px;">
+  <tr>
+    <td style="padding:14px 20px;">
+      <span style="color:#991b1b;font-size:14px;font-weight:600;">
+        🚨 &nbsp;All keys exhausted — add a new key to restore service immediately.
+      </span>
+    </td>
+  </tr>
+</table>
+{% endif %}
+
+<!-- All keys status table -->
+<p style="margin:0 0 10px;color:#374151;font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;">
+  All Keys Status
+</p>
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;font-size:13px;margin-bottom:8px;">
+  <tr style="background:#f3f4f6;">
+    <th style="padding:10px 14px;text-align:left;color:#6b7280;font-weight:600;">Key</th>
+    <th style="padding:10px 14px;text-align:left;color:#6b7280;font-weight:600;">Masked</th>
+    <th style="padding:10px 14px;text-align:left;color:#6b7280;font-weight:600;">Status</th>
+    <th style="padding:10px 14px;text-align:left;color:#6b7280;font-weight:600;">Since</th>
+  </tr>
+  {% for k in all_keys %}
+  <tr style="border-top:1px solid #e5e7eb;{% if loop.index is even %}background:#f9fafb;{% endif %}">
+    <td style="padding:10px 14px;color:#111827;font-weight:600;">{{ k.label }}</td>
+    <td style="padding:10px 14px;color:#6b7280;font-family:monospace;">{{ k.masked_key }}</td>
+    <td style="padding:10px 14px;">
+      {% if k.exhausted %}
+        <span style="color:#b91c1c;font-weight:600;">Exhausted</span>
+      {% else %}
+        <span style="color:#059669;font-weight:600;">Active</span>
+      {% endif %}
+    </td>
+    <td style="padding:10px 14px;color:#6b7280;">{{ k.exhausted_at or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
+
+{% block footer %}
+<p style="margin:0;color:#9ca3af;font-size:12px;line-height:1.7;">
+  Sent to <strong style="color:#6b7280;">{{ email }}</strong> &nbsp;·&nbsp;
+  {{ app_name }} key rotation alert
+</p>
+{% endblock %}
