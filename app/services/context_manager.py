@@ -114,7 +114,7 @@ class ContextManager:
             f"{context_block}"
             f"USER MESSAGE:\n{user_message}\n"
             f"{separator}\n"
-            f"Respond with the appropriate type: chat, clarification, or generation."
+            f"Respond with plain text or generation JSON according to the system prompt."
         )
 
 

@@ -40,6 +40,7 @@ from sqlalchemy.pool import NullPool
 
 from app.schemas.personas import CLARIFY_ANSWER_ID_PATTERN
 from app.services.clarification_store import store_questions
+from app.services.persona_apply import apply_generation
 from app.worker.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -123,7 +124,6 @@ Do not wrap in ```json or any other formatting. Raw JSON only.
 MAX_CLARIFICATION_ROUNDS = 5
 CLARIFICATION_TIMEOUT_SECONDS = 300.0
 PUBSUB_POLL_INTERVAL_SECONDS = 5.0
-PERSONA_FILE_COLUMNS = ("identity_md", "soul_md", "dna_md", "overview_md", "heartbeat_md")
 
 
 def _validate_clarification_payload(parsed: dict) -> list[dict]:
@@ -208,14 +208,11 @@ async def _run_generation(
 ) -> None:
     from app.core.config import settings
     from app.models.chat_session import ChatSession
-    from app.models.enums import PersonaCategory, PersonaStatus, SessionStatus
+    from app.models.enums import PersonaStatus, SessionStatus
     from app.models.persona import Persona
-    from app.models.persona_skill import PersonaSkill
     from app.models.user import User
     from app.services.context_manager import ContextManager
     from app.services.llm.factory import get_llm_adapter
-    from app.services.readme_builder import build_readme
-    from app.services.skill_matcher import match_skills
 
     adapter = get_llm_adapter()
     ctx = ContextManager()
@@ -437,21 +434,21 @@ async def _run_generation(
                 )
                 raise _NoRetry("max clarification rounds")
 
-            # ----------------------------------------------------------------
-            # Parse generation response and populate persona fields.
-            # ----------------------------------------------------------------
             assert parsed is not None
-            try:
-                files = parsed["files"]
-                if parsed["category"] not in {c.value for c in PersonaCategory}:
-                    raise ValueError(f"invalid category: {parsed['category']!r}")
-                persona.name = parsed["persona_name"]
-                persona.category = parsed["category"]
-                persona.description_summary = parsed["short_description"]
-                for col in PERSONA_FILE_COLUMNS:
-                    setattr(persona, col, files[col])
+
+            async def _commit_files_and_mark_skills_matching() -> None:
                 persona.status = PersonaStatus.GENERATING
                 await db.commit()
+                persona.status = PersonaStatus.SKILLS_MATCHING
+                await db.commit()
+
+            try:
+                await apply_generation(
+                    parsed,
+                    persona,
+                    db,
+                    after_files_applied=_commit_files_and_mark_skills_matching,
+                )
             except (KeyError, TypeError, ValueError) as exc:
                 persona.status = PersonaStatus.FAILED
                 persona.error_code = "INVALID_LLM_RESPONSE"
@@ -463,51 +460,6 @@ async def _run_generation(
                     "LLM generation response was malformed.",
                 )
                 raise _NoRetry("malformed generation response") from exc
-
-            # ----------------------------------------------------------------
-            # Skill matching.
-            # ----------------------------------------------------------------
-            persona.status = PersonaStatus.SKILLS_MATCHING
-            await db.commit()
-
-            try:
-                skills = await match_skills(
-                    parsed.get("suggested_skills", []),
-                    parsed["category"],
-                    db,
-                )
-            except NotImplementedError:
-                logger.warning(
-                    "match_skills stub pending; proceeding with empty skills for persona %s",
-                    persona_id,
-                )
-                skills = []
-            except Exception:
-                logger.exception(
-                    "match_skills raised unexpectedly for persona %s; continuing without skills",
-                    persona_id,
-                )
-                skills = []
-
-            if skills:
-                for skill in skills:
-                    db.add(PersonaSkill(persona_id=persona.id, skill_id=skill.id))
-                await db.commit()
-
-            try:
-                persona.readme_md = build_readme(
-                    {
-                        "name": persona.name,
-                        "category": persona.category,
-                        "description_summary": persona.description_summary,
-                    },
-                    skills,
-                )
-            except Exception:
-                logger.exception(
-                    "build_readme failed for persona %s; using empty readme", persona_id
-                )
-                persona.readme_md = ""
 
             persona.status = PersonaStatus.GENERATED
             session.status = SessionStatus.COMPLETE
