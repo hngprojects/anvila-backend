@@ -49,7 +49,9 @@ class SkillOut(BaseModel):
     name: str
     description: str
     tags: list[str]
-    files: list[SkillFile] = Field(default_factory=list)
+    source_url: str | None = None
+    content: str
+    files: list[SkillFile] | None = None
 
 
 class PersonaSummary(BaseModel):
