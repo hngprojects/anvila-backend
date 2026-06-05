@@ -25,3 +25,13 @@ class LLMResponse:
     # Example: "gemini-2.0-flash"
     # Stored for auditability — useful when we support multiple models.
     model: str
+
+
+@dataclass
+class LLMStreamChunk:
+    # Incremental text delta from the model. May be "" on the final usage chunk.
+    text: str
+
+    # Populated only on the terminal chunk, from provider usage metadata.
+    # None on intermediate chunks. Never estimated.
+    usage: LLMResponse | None = None

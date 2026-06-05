@@ -7,8 +7,7 @@ from app.services.llm.gemini import GeminiAdapter
 
 def test_factory_returns_gemini_adapter_when_provider_is_gemini(mocker, monkeypatch):
     monkeypatch.setattr(settings, "LLM_PROVIDER", "gemini")
-    mocker.patch("app.services.llm.gemini.genai.configure")
-    mocker.patch("app.services.llm.gemini.genai.GenerativeModel")
+    mocker.patch("app.services.llm.gemini.genai.Client")
 
     adapter = get_llm_adapter()
     assert isinstance(adapter, GeminiAdapter)
