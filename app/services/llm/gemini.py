@@ -8,7 +8,6 @@ from google.genai.errors import APIError, ClientError
 from app.core.config import settings
 from app.services.llm.base import LLMAdapter
 from app.services.llm.key_manager import AllKeysExhaustedError, GeminiKeyManager
-from app.services.llm.types import LLMResponse
 from app.services.llm.types import LLMResponse, LLMStreamChunk
 from app.services.llm.utils import extract_json
 
@@ -48,6 +47,7 @@ class GeminiAdapter(LLMAdapter):
         self._manager = self._get_key_manager()
         self._model_name: str = settings.GEMINI_MODEL_NAME
         self._client = self._build_client()
+        self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
     def _build_client(self) -> genai.Client:
         return genai.Client(api_key=self._manager.current_key)
@@ -60,27 +60,7 @@ class GeminiAdapter(LLMAdapter):
         try:
             return await self._call(prompt)
         except APIError as exc:
-            if not _is_quota_error(exc):
-                logger.error(
-                    "Gemini API error on %s (code=%s status=%s): %s",
-                    self._manager.active_key_label,
-                    exc.code,
-                    exc.status,
-                    exc.message,
-                )
-                raise
-
-            logger.warning(
-                "Quota exhausted on %s (429) — rotating key.",
-                self._manager.active_key_label,
-            )
-            try:
-                await self._manager.rotate(exhausted_key=exhausted_key)
-            except AllKeysExhaustedError:
-                logger.error("All Gemini API keys are exhausted.")
-                raise
-
-            self._client = self._build_client()
+            await self._rotate_on_quota(exc, exhausted_key)
             logger.info("Retrying with %s.", self._manager.active_key_label)
             return await self._call(prompt)
 
@@ -101,17 +81,26 @@ class GeminiAdapter(LLMAdapter):
         )
 
     async def stream(self, prompt: str) -> AsyncIterator[LLMStreamChunk]:
+        exhausted_key = self._manager.current_key
+        try:
+            async for chunk in self._stream_once(prompt):
+                yield chunk
+        except ClientError as exc:
+            await self._rotate_on_quota(exc, exhausted_key)
+            logger.info("Retrying stream with %s.", self._manager.active_key_label)
+            async for chunk in self._stream_once(prompt):
+                yield chunk
+
+    async def _stream_once(self, prompt: str) -> AsyncIterator[LLMStreamChunk]:
         last_usage = None
-        stream = await self.client.aio.models.generate_content_stream(
+        stream = await self._client.aio.models.generate_content_stream(
             model=self._model_name,
             contents=prompt,
         )
-
         async for chunk in stream:
             usage = getattr(chunk, "usage_metadata", None)
             if usage is not None:
                 last_usage = usage
-
             text = getattr(chunk, "text", None) or ""
             if text:
                 yield LLMStreamChunk(text=text)
@@ -126,6 +115,33 @@ class GeminiAdapter(LLMAdapter):
                 model=self._model_name,
             ),
         )
+
+    async def _rotate_on_quota(self, exc: APIError, exhausted_key: str) -> None:
+        """
+        Re-raise non-quota errors immediately. For 429s, rotate the key and
+        rebuild the client — or raise if all keys are exhausted.
+        """
+        if not _is_quota_error(exc):
+            logger.error(
+                "Gemini API error on %s (code=%s status=%s): %s",
+                self._manager.active_key_label,
+                exc.code,
+                exc.status,
+                exc.message,
+            )
+            raise exc
+
+        logger.warning(
+            "Quota exhausted on %s (429) — rotating key.",
+            self._manager.active_key_label,
+        )
+        try:
+            await self._manager.rotate(exhausted_key=exhausted_key)
+        except AllKeysExhaustedError:
+            logger.error("All Gemini API keys are exhausted.")
+            raise
+
+        self._client = self._build_client()
 
     async def is_healthy(self) -> bool:
         try:
