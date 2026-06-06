@@ -1,3 +1,4 @@
+import enum
 import hashlib
 import logging
 import secrets
@@ -13,7 +14,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.security import create_access_token
+from app.core.encryption import encrypt
+from app.core.security import create_access_token_for_user, create_token, decode_token
 from app.models.enums import UserProvider
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
@@ -25,7 +27,9 @@ from app.services.auth import (
 from app.services.oauth_link import mint_link_token
 
 GITHUB_LINK_CONFIRMATION_PATH = "/api/v1/auth/oauth/confirm-link"
+GITHUB_SCOPES = "read:user user:email repo"
 _GITHUB_PROVIDER = "github"
+_STATE_TTL = timedelta(minutes=10)
 
 _logger = logging.getLogger(__name__)
 
@@ -37,6 +41,11 @@ class LoginCompleted:
     user: User
 
 
+@dataclass
+class ConnectCompleted:
+    user: User
+
+
 @dataclass(slots=True)
 class LinkConfirmationRequired:
     email: str
@@ -45,7 +54,12 @@ class LinkConfirmationRequired:
     github_subject: str
 
 
-CallbackOutcome = LoginCompleted | LinkConfirmationRequired
+class GitHubOAuthIntent(enum.StrEnum):
+    LOGIN = "github_login"
+    CONNECT = "github_connect"
+
+
+CallbackOutcome = LoginCompleted | LinkConfirmationRequired | ConnectCompleted
 
 
 def _make_async_client(*, transport: httpx.AsyncBaseTransport | None = None) -> httpx.AsyncClient:
@@ -64,12 +78,40 @@ def build_github_auth_url(state: str) -> str:
     params = {
         "client_id": settings.GITHUB_CLIENT_ID,
         "redirect_uri": settings.GITHUB_REDIRECT_URI,
-        "scope": settings.GITHUB_SCOPES,
+        "scope": GITHUB_SCOPES,
         "state": state,
         "response_type": "code",
         "allow_signup": "true",
     }
     return f"{settings.GITHUB_AUTH_URL}?{urlencode(params)}"
+
+
+def create_github_login_state() -> str:
+    return create_token(
+        {"purpose": GitHubOAuthIntent.LOGIN},
+        expires=_STATE_TTL,
+    )
+
+
+def create_github_connect_state(user_id: str) -> str:
+    return create_token(
+        {"purpose": GitHubOAuthIntent.CONNECT, "uid": user_id},
+        expires=_STATE_TTL,
+    )
+
+
+def decode_github_state(state: str) -> tuple[GitHubOAuthIntent, str | None]:
+    """
+    Decode state JWT and return (intent, user_id).
+    """
+    payload = decode_token(state)
+
+    try:
+        intent = GitHubOAuthIntent(payload.get("purpose"))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid OAuth state purpose") from e
+
+    return intent, payload.get("uid")
 
 
 async def exchange_github_code(
@@ -189,7 +231,7 @@ async def _mint_session_tokens(
     # Q9: rotate refresh tokens on every successful OAuth login.
     await revoke_all_active_refresh_tokens(db, user.id)
 
-    access_token = create_access_token(str(user.id))
+    access_token = create_access_token_for_user(user)
     raw_refresh = secrets.token_urlsafe(32)
     refresh_record = RefreshToken(
         token_hash=hashlib.sha256(raw_refresh.encode()).hexdigest(),
@@ -227,6 +269,7 @@ async def process_github_callback(
     *,
     code: str,
     request: Request,
+    connect_for_user_id: str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> CallbackOutcome:
     _logger.info(
@@ -244,18 +287,52 @@ async def process_github_callback(
             detail="GitHub token response missing access token",
         )
 
+    encrypted_token = encrypt(github_access_token)
     profile = await fetch_github_profile(github_access_token, transport=transport)
     subject_raw = profile.get("id")
-    if subject_raw is None:
-        _logger.warning(
-            "event=auth.oauth.github.callback.error outcome=no_profile_id",
-        )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="GitHub profile missing id",
-        )
-    subject = str(subject_raw)
 
+    # CONNECT FLOW
+    if connect_for_user_id is not None:
+        if subject_raw is None:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "GitHub profile missing id")
+
+        user = await db.get(User, connect_for_user_id)
+        if not user or not user.is_active:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Account not found or disabled")
+        subject = str(subject_raw)
+        if user.github_subject and user.github_subject != subject:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "A different GitHub account is already connected to this user",
+            )
+        existing_owner = await get_user_by_github_subject(db, subject)
+        if existing_owner is not None and existing_owner.id != user.id:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "This GitHub account is already connected to another user",
+            )
+
+        user.github_access_token_encrypted = encrypted_token
+        user.github_connected = True
+        user.github_username = (
+            str(profile["login"]) if profile.get("login") else user.github_username
+        )
+        user.github_subject = str(subject_raw)
+
+        await db.flush()
+        _logger.info(
+            "event=auth.github.connect.success user_id=%s username=%s",
+            user.id,
+            user.github_username,
+        )
+        return ConnectCompleted(user=user)
+
+    # LOGIN FLOW
+    if subject_raw is None:
+        _logger.warning("event=auth.oauth.github.callback.error outcome=no_profile_id")
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "GitHub profile missing id")
+
+    subject = str(subject_raw)
     emails = await fetch_github_verified_emails(github_access_token, transport=transport)
     verified_email = resolve_primary_verified_email(emails)
     if not verified_email:
@@ -269,6 +346,11 @@ async def process_github_callback(
 
     email_hash = _hash_email_for_log(verified_email)
 
+    def _apply_github_connection(u: User) -> None:
+        """Store token + mark connected on any login branch."""
+        u.github_access_token_encrypted = encrypted_token
+        u.github_connected = True
+
     existing_by_subject = await get_user_by_github_subject(db, subject)
     if existing_by_subject is not None:
         if not existing_by_subject.is_active:
@@ -276,6 +358,10 @@ async def process_github_callback(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is disabled",
             )
+
+        _apply_github_connection(existing_by_subject)
+        await db.flush()
+
         access_token, raw_refresh = await _mint_session_tokens(
             db, user=existing_by_subject, request=request
         )
@@ -300,12 +386,14 @@ async def process_github_callback(
             )
         existing_by_email.github_subject = subject
         existing_by_email.github_username = str(profile["login"]) if profile.get("login") else None
+        _apply_github_connection(existing_by_email)
         await db.flush()
         access_token, raw_refresh = await _mint_session_tokens(
             db, user=existing_by_email, request=request
         )
         _logger.info(
-            "event=auth.oauth.github.link_pending outcome=link_required user_id=%s email_hash=%s",
+            "event=auth.oauth.github.callback.success outcome=email_linked "
+            "user_id=%s email_hash=%s",
             existing_by_email.id,
             email_hash,
         )
@@ -324,6 +412,8 @@ async def process_github_callback(
         is_active=True,
         github_subject=subject,
         github_username=str(profile["login"]) if profile.get("login") else None,
+        github_access_token_encrypted=encrypted_token,
+        github_connected=True,
     )
     db.add(new_user)
     try:
@@ -335,16 +425,16 @@ async def process_github_callback(
             resolved = await get_user_by_email(db, verified_email)
         if resolved is None:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to resolve user after concurrent OAuth registration",
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "Failed to resolve user after concurrent OAuth registration",
             ) from exc
-        # Concurrent racer won. If it already owns this subject, log them in.
+
+        # Race resolved — treat as returning user, still apply connection
         if resolved.github_subject == subject:
             if not resolved.is_active:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Account is disabled",
-                ) from exc
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is disabled") from exc
+            _apply_github_connection(resolved)
+            await db.flush()
             access_token, raw_refresh = await _mint_session_tokens(
                 db, user=resolved, request=request
             )

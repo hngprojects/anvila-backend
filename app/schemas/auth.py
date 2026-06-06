@@ -2,6 +2,7 @@ import re
 import uuid
 from datetime import datetime
 
+import bleach
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
@@ -15,15 +16,33 @@ def check_password(v: str) -> str:
     return v
 
 
+# removes dangerous HTML tags and attributes
+def sanitize_display_name(v: str) -> str:
+    stripped = bleach.clean(v, tags=[], attributes={}, strip=True)
+    stripped = " ".join(stripped.split())
+    if not stripped:
+        raise ValueError("Display name cannot be empty or contain only markup")
+    if not (2 <= len(stripped) <= 100):
+        raise ValueError("Display name must be between 2 and 100 characters")
+    return stripped
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
-    display_name: str | None = None
+    display_name: str | None = Field(default=None, min_length=2, max_length=100)
 
     @field_validator("password")
     @classmethod
     def password_strength(cls, v: str) -> str:
         return check_password(v)
+
+    @field_validator("display_name")
+    @classmethod
+    def clean_display_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return sanitize_display_name(v)
 
 
 class LoginRequest(BaseModel):
@@ -96,6 +115,9 @@ class MeResponse(BaseModel):
     is_admin: bool
     is_super_admin: bool
     email_verified: bool
+    github_subject: str | None
+    github_username: str | None
+    github_connected: bool
     created_at: str
 
     model_config = {"from_attributes": True}

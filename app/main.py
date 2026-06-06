@@ -5,9 +5,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.router import api_router
 from app.core.config import LOGGING_CONFIG, settings
+from app.core.middleware import attach_user_to_request
+from app.core.rate_limit import limiter, rate_limit_error_handler
+from app.db.redis import close_redis, init_redis
 
 logging.config.dictConfig(LOGGING_CONFIG)  # pyright: ignore[reportAttributeAccessIssue]
 logger = logging.getLogger(__name__)
@@ -16,7 +21,13 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting up the FastAPI application...")
+    try:
+        await init_redis()
+    except Exception:
+        logger.exception("Failed to connect to Redis on startup.")
+        raise
     yield
+    await close_redis()
     logger.info("Shutting down the FastAPI application...")
 
 
@@ -73,6 +84,12 @@ async def prometheus_metrics_middleware(request: Request, call_next):
         ).observe(duration)
 
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_error_handler)
+
+app.add_middleware(SlowAPIMiddleware)
+
+app.middleware("http")(attach_user_to_request)
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
 

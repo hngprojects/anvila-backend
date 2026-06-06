@@ -1,4 +1,5 @@
 import logging
+from pathlib import PurePosixPath
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -9,6 +10,7 @@ from app.models.persona import Persona
 from app.models.persona_skill import PersonaSkill
 from app.models.skill import Skill
 from app.services.github_service import create_or_get_repo, upsert_file
+from app.services.skills.prompt_builder import build_skill_md
 from app.utils.slugify import slugify
 
 logger = logging.getLogger(__name__)
@@ -22,6 +24,58 @@ PERSONA_FILES: list[tuple[str, str]] = [
     ("overview_md", "overview.md"),
     ("heartbeat_md", "heartbeat.md"),
 ]
+
+
+def safe_skill_files(files: list[dict] | None) -> list[dict[str, str]]:
+    """Filter skill file entries to paths that cannot escape their skill folder.
+
+    Drops entries where the path is:
+      - not a string, empty, or whitespace-only
+      - absolute (starts with "/")
+      - contains a backslash
+      - contains a ".." segment after POSIX normalisation
+
+    Also drops entries that aren't dicts, or whose "content" isn't a string.
+    Returns a new list; does not mutate the input.
+    """
+    if not files:
+        return []
+
+    safe: list[dict[str, str]] = []
+    for entry in files:
+        if not isinstance(entry, dict):
+            continue
+        path = entry.get("path")
+        content = entry.get("content")
+        if not isinstance(path, str) or not path.strip():
+            continue
+        if not isinstance(content, str):
+            continue
+        if path.startswith("/") or "\\" in path:
+            continue
+        parts = PurePosixPath(path).parts
+        if ".." in parts:
+            continue
+        safe.append({"path": path, "content": content})
+    return safe
+
+
+def is_safe_skill_slug(slug: str | None) -> bool:
+    """Return True if the slug is safe to use as a path component.
+
+    Rejects:
+      - non-strings or empty/whitespace-only strings
+      - any string containing "/", "\\", or ".."
+      - strings starting with "." (hidden-file convention; also
+        catches the degenerate case where the slug IS just "..")
+    """
+    if not isinstance(slug, str) or not slug.strip():
+        return False
+    if "/" in slug or "\\" in slug or ".." in slug:
+        return False
+    if slug.startswith("."):
+        return False
+    return True
 
 
 async def publish_persona(persona: Persona, db: AsyncSession) -> Persona:
@@ -64,14 +118,47 @@ async def publish_persona(persona: Persona, db: AsyncSession) -> Persona:
             message=f"chore: publish {filename}",
         )
 
-    # Persona markdown files → repo root
     for skill in skills:
-        await upsert_file(
-            slug=slug,
-            path=f"skills/{skill.slug}.md",
-            content=skill.content,
-            message=f"chore: add skill {skill.slug}",
-        )
+        if not is_safe_skill_slug(skill.slug):
+            logger.warning(
+                "skipping skill id=%s with unsafe slug %r in publish: refusing to write to GitHub",
+                skill.id,
+                skill.slug,
+            )
+            continue
+
+        safe_files = safe_skill_files(skill.files)
+        if safe_files:
+            for entry in safe_files:
+                await upsert_file(
+                    slug=slug,
+                    path=f"skills/{skill.slug}/{entry['path']}",
+                    content=entry["content"],
+                    message=f"chore: add skill {skill.slug}/{entry['path']}",
+                )
+        elif skill.content:
+            skill_md = build_skill_md(
+                skill.slug,
+                {
+                    "displayName": skill.name,
+                    "summary": skill.description,
+                    "tags": skill.tags or [],
+                    "ownerHandle": skill.source_author or "",
+                    "url": skill.source_url or "",
+                },
+                source_url=skill.source_url or "",
+            )
+            await upsert_file(
+                slug=slug,
+                path=f"skills/{skill.slug}.md",
+                content=skill_md,
+                message=f"chore: add skill {skill.slug}",
+            )
+        else:
+            logger.warning(
+                "skipping skill %s in publish: both files and content empty",
+                skill.slug,
+            )
 
     persona.status = PersonaStatus.PUBLISHED
     persona.github_repo_url = repo.get("html_url")

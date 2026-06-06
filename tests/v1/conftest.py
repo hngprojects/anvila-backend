@@ -2,6 +2,7 @@ import asyncio
 import os
 import uuid
 from collections.abc import AsyncGenerator, Callable
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -10,8 +11,9 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from app.core.security import create_access_token
+from app.core.security import create_access_token_for_user
 from app.db.session import get_session
+import app.db.redis as redis_module
 from app.main import app
 from app.models.base import Base
 from app.models.enums import UserPlan, UserProvider
@@ -140,13 +142,39 @@ async def admin_user(db_session: AsyncSession) -> User:
 
 @pytest.fixture()
 def auth_headers(test_user: User) -> dict[str, str]:
-    token = create_access_token(str(test_user.id))
+    token = create_access_token_for_user(test_user)
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture()
 def auth_headers_for() -> Callable[[User], dict[str, str]]:
     def _make(user: User) -> dict[str, str]:
-        return {"Authorization": f"Bearer {create_access_token(str(user.id))}"}
+        return {"Authorization": f"Bearer {create_access_token_for_user(user)}"}
 
     return _make
+
+
+async def async_iter(items):
+    for item in items:
+        yield item
+
+
+@pytest.fixture(autouse=True)
+def mock_redis_client():
+    redis = AsyncMock()
+    redis.get = AsyncMock(return_value=None)
+    redis.set = AsyncMock(return_value=True)
+    redis.delete = AsyncMock(return_value=1)
+    redis.incr = AsyncMock(return_value=1)
+    redis.keys = AsyncMock(return_value=[])
+
+    redis.scan_iter = MagicMock(return_value=async_iter([]))
+
+    lock = AsyncMock()
+    lock.__aenter__ = AsyncMock(return_value=None)
+    lock.__aexit__ = AsyncMock(return_value=False)
+    redis.lock = MagicMock(return_value=lock)
+
+    redis_module._redis_client = redis
+    yield redis
+    redis_module._redis_client = None

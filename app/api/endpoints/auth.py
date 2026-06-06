@@ -18,7 +18,12 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import CurrentUser, DBSession
 from app.core.config import settings
-from app.core.security import create_access_token, create_oauth_state_token, decode_token
+from app.core.rate_limit import limiter
+from app.core.security import (
+    create_access_token_for_user,
+    create_oauth_state_token,
+    decode_token,
+)
 from app.email.sender import (
     send_oauth_link_email,
     send_password_reset_email,
@@ -54,9 +59,13 @@ from app.services.auth import (
 )
 from app.services.github_oauth import (
     GITHUB_LINK_CONFIRMATION_PATH,
+    GitHubOAuthIntent,
     LoginCompleted,
     apply_github_link,
     build_github_auth_url,
+    create_github_connect_state,
+    create_github_login_state,
+    decode_github_state,
     process_github_callback,
 )
 from app.services.google_oauth import (
@@ -78,8 +87,9 @@ _logger = logging.getLogger(__name__)
     response_model=ApiResponse[UserResponse],
     status_code=status.HTTP_201_CREATED,
 )
+@limiter.limit("5/hour")
 async def register(
-    body: RegisterRequest, db: DBSession, bg_task: BackgroundTasks
+    request: Request, body: RegisterRequest, db: DBSession, bg_task: BackgroundTasks
 ) -> ApiResponse[UserResponse]:
     try:
         user, verification_url = await auth_service.register_user(
@@ -106,6 +116,7 @@ async def register(
 
 
 @router.post("/login", response_model=ApiResponse[LoginData])
+@limiter.limit("10/minute")
 async def login(body: LoginRequest, request: Request, db: DBSession) -> ApiResponse[LoginData]:
     user_agent = request.headers.get("user-agent")
     ip_address = request.client.host if request.client else None
@@ -131,7 +142,10 @@ async def login(body: LoginRequest, request: Request, db: DBSession) -> ApiRespo
 
 
 @router.post("/verify-email", response_model=ApiResponse[UserResponse])
-async def verify_email(body: VerifyEmailRequest, db: DBSession) -> ApiResponse[UserResponse]:
+@limiter.limit("10/hour")
+async def verify_email(
+    request: Request, body: VerifyEmailRequest, db: DBSession
+) -> ApiResponse[UserResponse]:
     user = await auth_service.verify_email(db, body.token)
     await db.commit()
     await db.refresh(user)
@@ -142,9 +156,14 @@ async def verify_email(body: VerifyEmailRequest, db: DBSession) -> ApiResponse[U
     )
 
 
-@router.post("/resend-verification", response_model=ApiResponse[None])
+@router.post(
+    "/resend-verification",
+    response_model=ApiResponse[None],
+    status_code=status.HTTP_202_ACCEPTED,  # accept
+)
+@limiter.limit("3/hour")
 async def resend_verification(
-    body: ResendVerificationRequest, db: DBSession, bg_task: BackgroundTasks
+    request: Request, body: ResendVerificationRequest, db: DBSession, bg_task: BackgroundTasks
 ) -> ApiResponse[None]:
     verification_url = await auth_service.resend_verification_email(db, body.email)
 
@@ -160,7 +179,10 @@ async def resend_verification(
 
 
 @router.post("/refresh", response_model=ApiResponse[RefreshData])
-async def refresh_token_endpoint(body: RefreshRequest, db: DBSession) -> ApiResponse[RefreshData]:
+@limiter.limit("30/minute")
+async def refresh_token_endpoint(
+    request: Request, body: RefreshRequest, db: DBSession
+) -> ApiResponse[RefreshData]:
     access_token = await auth_service.refresh_access_token(db, body.refresh_token)
 
     return ApiResponse[RefreshData](
@@ -170,7 +192,10 @@ async def refresh_token_endpoint(body: RefreshRequest, db: DBSession) -> ApiResp
 
 
 @router.post("/logout", response_model=ApiResponse[None], status_code=status.HTTP_200_OK)
-async def logout_endpoint(body: LogoutRequest, db: DBSession) -> ApiResponse[None]:
+@limiter.limit("20/minute")
+async def logout_endpoint(
+    request: Request, body: LogoutRequest, db: DBSession
+) -> ApiResponse[None]:
     await auth_service.logout_user(db, body.refresh_token)
     await db.commit()
 
@@ -178,13 +203,14 @@ async def logout_endpoint(body: LogoutRequest, db: DBSession) -> ApiResponse[Non
 
 
 @router.post("/forgot-password", response_model=ApiResponse[None])
+@limiter.limit("3/hour")
 async def forgot_password(
-    body: ForgotPasswordRequest, db: DBSession, bg_task: BackgroundTasks
+    request: Request, body: ForgotPasswordRequest, db: DBSession, bg_task: BackgroundTasks
 ) -> ApiResponse[None]:
     raw_token = await auth_service.create_password_reset_token(db, body.email)
 
     if raw_token:
-        reset_url = f"{settings.FRONTEND_URL}/reset-password#token={raw_token}"
+        reset_url = f"{settings.FRONTEND_URL}/reset-password?token={raw_token}"
         bg_task.add_task(send_password_reset_email, body.email, reset_url)
 
     # Intentionally vague — never reveal whether the email exists or has a password account
@@ -194,7 +220,10 @@ async def forgot_password(
 
 
 @router.post("/reset-password", response_model=ApiResponse[None])
-async def reset_password_endpoint(body: ResetPasswordRequest, db: DBSession) -> ApiResponse[None]:
+@limiter.limit("5/hour")
+async def reset_password_endpoint(
+    request: Request, body: ResetPasswordRequest, db: DBSession
+) -> ApiResponse[None]:
     success = await auth_service.reset_password(db, body.token, body.new_password)
 
     if not success:
@@ -207,7 +236,8 @@ async def reset_password_endpoint(body: ResetPasswordRequest, db: DBSession) -> 
 
 
 @router.get("/me", response_model=ApiResponse[MeResponse])
-async def me_endpoint(current_user: CurrentUser) -> ApiResponse[MeResponse]:
+@limiter.limit("60/minute")
+async def me_endpoint(request: Request, current_user: CurrentUser) -> ApiResponse[MeResponse]:
     return ApiResponse[MeResponse](
         data=MeResponse(
             id=str(current_user.id),
@@ -220,6 +250,9 @@ async def me_endpoint(current_user: CurrentUser) -> ApiResponse[MeResponse]:
             is_super_admin=current_user.is_super_admin,
             email_verified=current_user.email_verified,
             created_at=current_user.created_at.isoformat(),
+            github_subject=current_user.github_subject,
+            github_username=current_user.github_username,
+            github_connected=current_user.github_connected,
         ),
     )
 
@@ -319,7 +352,19 @@ _github_router = APIRouter(tags=["auth"])
 
 @_github_router.get("/github", summary="Start GitHub OAuth flow")
 async def github_start(response: Response) -> Response:
-    state = create_oauth_state_token()
+    state = create_github_login_state()
+    set_oauth_state_cookie(response, state)
+    response.status_code = status.HTTP_307_TEMPORARY_REDIRECT
+    response.headers["Location"] = build_github_auth_url(state)
+    return response
+
+
+@_github_router.get("/github/connect", summary="Connect GitHub to existing account")
+async def github_connect_start(
+    response: Response,
+    current_user: CurrentUser,
+) -> Response:
+    state = create_github_connect_state(str(current_user.id))
     set_oauth_state_cookie(response, state)
     response.status_code = status.HTTP_307_TEMPORARY_REDIRECT
     response.headers["Location"] = build_github_auth_url(state)
@@ -359,7 +404,20 @@ async def github_callback(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid OAuth state",
             )
-        decode_token(state, expected_purpose="oauth_state")
+        intent, connect_user_id = decode_github_state(state)
+
+        if intent == GitHubOAuthIntent.CONNECT:
+            await process_github_callback(
+                db, code=code, request=request, connect_for_user_id=connect_user_id
+            )
+            await db.commit()
+            # FE already has a valid session — just redirect back, it calls /me to refresh state
+            redirect = RedirectResponse(
+                f"{settings.FRONTEND_URL}/connections/github?github=connected",
+                status_code=302,
+            )
+            clear_oauth_state_cookie(redirect)
+            return redirect
 
         outcome = await process_github_callback(db, code=code, request=request)
 
@@ -379,9 +437,9 @@ async def github_callback(
         await db.commit()
         clear_oauth_state_cookie(response)
         link_url = (
-            f"{settings.FRONTEND_URL}{GITHUB_LINK_CONFIRMATION_PATH}?token={outcome.link_token}"
+            f"{settings.FRONTEND_URL}{GITHUB_LINK_CONFIRMATION_PATH}?token={outcome.link_token}"  # type: ignore
         )
-        bg_task.add_task(send_oauth_link_email, outcome.email, link_url)
+        bg_task.add_task(send_oauth_link_email, outcome.email, link_url)  # type: ignore
         return ApiResponse[LinkConfirmationData](
             message=(
                 "We've sent a confirmation link to your email. "
@@ -389,7 +447,7 @@ async def github_callback(
             ),
             data=LinkConfirmationData(
                 link_confirmation_required=True,
-                email_destination_hint=_mask_email(outcome.email),
+                email_destination_hint=_mask_email(outcome.email),  # type: ignore
             ),
         )
 
@@ -438,7 +496,7 @@ async def confirm_link(
 
         await revoke_all_active_refresh_tokens(db, user.id)
 
-        access_token = create_access_token(str(user.id))
+        access_token = create_access_token_for_user(user)
         raw_refresh = secrets.token_urlsafe(32)
         refresh_record = RefreshToken(
             token_hash=hashlib.sha256(raw_refresh.encode()).hexdigest(),

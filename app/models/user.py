@@ -10,6 +10,7 @@ from app.models.enums import UserPlan, UserProvider
 if TYPE_CHECKING:
     from app.models.chat_session import ChatSession
     from app.models.oauth_link_token import OAuthLinkToken
+    from app.models.payment_transaction import PaymentTransaction
     from app.models.persona import Persona
     from app.models.refresh_token import RefreshToken
 
@@ -105,6 +106,9 @@ class User(BaseModel):
         nullable=True,
     )
 
+    # for invalidate all existing tokens on password change or other security events
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
     # Relationships to add
     chat_sessions: Mapped[list["ChatSession"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
@@ -122,4 +126,7 @@ class User(BaseModel):
     oauth_link_tokens: Mapped[list["OAuthLinkToken"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+    payment_transactions: Mapped[list["PaymentTransaction"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
     )

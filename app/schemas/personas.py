@@ -39,11 +39,23 @@ class GenerateResponse(BaseModel):
     job_id: str
 
 
+class RefineRequest(BaseModel):
+    message: str
+
+
+class SkillFile(BaseModel):
+    path: str
+    content: str
+
+
 class SkillOut(BaseModel):
     slug: str
     name: str
     description: str
     tags: list[str]
+    source_url: str | None = None
+    content: str
+    files: list[SkillFile] | None = None
 
 
 class PersonaSummary(BaseModel):

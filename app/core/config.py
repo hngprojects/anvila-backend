@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Annotated
 
+from cryptography.fernet import Fernet
 from pydantic import Field, PostgresDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -26,8 +27,11 @@ class Settings(BaseSettings):
     TRUSTED_PROXIES: str = ""
     COOKIE_SECURE: bool = True
 
-    # redis
+    # ------------------------------------------------------------------
+    # Redis / cache
+    # ------------------------------------------------------------------
     REDIS_URL: str = ""
+    DEFAULT_CACHE_TTL: int = 300  # seconds
 
     # ------------------------------------------------------------------
     # JWT / tokens
@@ -38,6 +42,15 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: Annotated[int, Field(gt=0)] = 7
     VERIFICATION_TOKEN_EXPIRE_HOURS: Annotated[int, Field(gt=0)] = 24
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: Annotated[int, Field(gt=0)] = 60
+    ENCRYPTION_KEY: str
+
+    @model_validator(mode="after")
+    def _validate_encryption_key(self) -> "Settings":
+        try:
+            Fernet(self.ENCRYPTION_KEY.encode())
+        except Exception as exc:
+            raise ValueError("ENCRYPTION_KEY must be a valid Fernet key") from exc
+        return self
 
     # ------------------------------------------------------------------
     # EMAIL
@@ -102,8 +115,10 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     LLM_PROVIDER: str = "gemini"
     GEMINI_API_KEY: str | None = None
+    GEMINI_API_KEYS: list[str] = []
     GEMINI_MODEL_NAME: str = "gemini-3.5-flash"
     GEMINI_TIMEOUT_SECONDS: Annotated[int, Field(gt=0)] = 30
+    ALERT_EMAIL_RECIPIENTS: list[str] = []  # emails that should be alerted for key exhuastion
 
     @model_validator(mode="after")
     def _validate_llm_credentials(self) -> "Settings":
@@ -114,6 +129,13 @@ class Settings(BaseSettings):
             raise ValueError("LLM_PROVIDER='gemini' requires GEMINI_API_KEY to be set.")
         self.LLM_PROVIDER = provider
         return self
+
+    # ------------------------------------------------------------------
+    # stripe
+    # ------------------------------------------------------------------
+    STRIPE_SECRET_KEY: str
+    STRIPE_PRICE_ID: str
+    STRIPE_WEBHOOK_SECRET: str
 
 
 @lru_cache
