@@ -66,26 +66,26 @@ async def get_current_admin(current_user: CurrentUser) -> User:
 
 
 def require_can_generate(user: CurrentUser) -> User:
-    if user.plan == UserPlan.FREE and user.generation_count >= 3:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "GENERATION_LIMIT_REACHED",
-                "message": "Free plan persona generation limit reached. Upgrade to continue.",
-            },
-        )
+    # if user.plan == UserPlan.FREE and user.generation_count >= 3:
+    #     raise HTTPException(
+    #         status_code=403,
+    #         detail={
+    #             "code": "GENERATION_LIMIT_REACHED",
+    #             "message": "Free plan persona generation limit reached. Upgrade to continue.",
+    #         },
+    #     )
     return user
 
 
 def require_can_refine(user: CurrentUser) -> User:
-    if user.plan == UserPlan.FREE and user.refine_used:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "REFINE_LIMIT_REACHED",
-                "message": "One free refinement used. Upgrade to continue.",
-            },
-        )
+    # if user.plan == UserPlan.FREE and user.refine_used:
+    #     raise HTTPException(
+    #         status_code=403,
+    #         detail={
+    #             "code": "REFINE_LIMIT_REACHED",
+    #             "message": "One free refinement used. Upgrade to continue.",
+    #         },
+    #     )
     return user
 
 
