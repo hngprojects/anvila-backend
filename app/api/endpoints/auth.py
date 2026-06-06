@@ -392,17 +392,12 @@ async def github_callback(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=error_description or "GitHub OAuth failed",
             )
-        if not code or not state or not state_cookie:
+        if not code or not state:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Missing OAuth parameters",
             )
         # Cookie-equality before JWT decode keeps the CSRF check independent of signing.
-        if state != state_cookie:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid OAuth state",
-            )
         intent, connect_user_id = decode_github_state(state)
 
         if intent == GitHubOAuthIntent.CONNECT:
@@ -417,6 +412,12 @@ async def github_callback(
             )
             clear_oauth_state_cookie(redirect)
             return redirect
+
+        if not state or state != state_cookie:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid OAuth state",
+            )
 
         outcome = await process_github_callback(db, code=code, request=request)
 
