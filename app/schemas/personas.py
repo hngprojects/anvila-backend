@@ -39,6 +39,10 @@ class GenerateResponse(BaseModel):
     job_id: str
 
 
+class RefineRequest(BaseModel):
+    message: str
+
+
 class SkillFile(BaseModel):
     path: str
     content: str

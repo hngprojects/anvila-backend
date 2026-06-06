@@ -1,15 +1,17 @@
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from redis.asyncio import Redis
 from sqlalchemy import and_, case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
-from app.api.deps import CanGenerate, CurrentUser, DBSession
+from app.api.deps import CanGenerate, CanRefine, CurrentUser, DBSession
 from app.core.cache import explore_cache
 from app.core.config import settings
 from app.core.paginator import PageParams, paginate
@@ -34,6 +36,7 @@ from app.schemas.personas import (
     PersonaStatusResponse,
     PersonaSummary,
     PublishPersonaResponse,
+    RefineRequest,
     SkillOut,
 )
 from app.schemas.shared import ApiResponse
@@ -41,12 +44,15 @@ from app.services.auth import get_user_by_id
 from app.services.context_manager import ContextManager
 from app.services.file_extractor import extract_text
 from app.services.prompt_sanitizer import PromptSanitizer
-from app.services.publish_service import publish_persona
-from app.services.stream_service import stream_generation
+from app.services.publish_service import publish_persona, safe_skill_files
+from app.services.stream_service import _sse, stream_generation
 from app.worker.tasks.generation import generate_persona
+from app.worker.tasks.refine import refine_persona
 
 MAX_CLARIFICATION_ROUNDS = 5
 POLL_INTERVAL = 1.5
+REFINE_RELAY_IDLE_TIMEOUT_SECONDS = 300.0
+REFINE_RELAY_POLL_SECONDS = 1.0
 router = APIRouter(prefix="/personas", tags=["personas"])
 
 
@@ -222,6 +228,163 @@ async def clarify(
     return ApiResponse[ClarifyResponse](
         message="Clarification recorded.",
         data=ClarifyResponse(status="clarifying", round=session.clarification_round),
+    )
+
+
+async def _relay_refine(
+    channel: str,
+    persona_id: uuid.UUID,
+    session_id: uuid.UUID,
+    sanitized_message: str,
+):
+    redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    pubsub = redis_client.pubsub()
+
+    try:
+        await pubsub.subscribe(channel)
+
+        try:
+            refine_persona.delay(  # type: ignore[attr-defined]
+                str(persona_id),
+                str(session_id),
+                channel,
+                sanitized_message,
+            )
+        except Exception:
+            yield _sse(
+                "error",
+                {
+                    "code": "QUEUE_UNAVAILABLE",
+                    "message": "Failed to queue refinement job.",
+                },
+            )
+            return
+
+        yield _sse("start", {"persona_id": str(persona_id)})
+
+        terminal_events = {"done", "complete", "error"}
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + REFINE_RELAY_IDLE_TIMEOUT_SECONDS
+
+        while loop.time() < deadline:
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=True,
+                timeout=REFINE_RELAY_POLL_SECONDS,
+            )
+            if not message or message.get("type") != "message":
+                continue
+
+            try:
+                payload = json.loads(message["data"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+
+            event_type = payload.pop("type", None)
+            if not isinstance(event_type, str) or not event_type:
+                continue
+
+            yield _sse(event_type, payload)
+            deadline = loop.time() + REFINE_RELAY_IDLE_TIMEOUT_SECONDS
+            if event_type in terminal_events:
+                return
+
+        yield _sse(
+            "error",
+            {
+                "code": "REFINE_TIMEOUT",
+                "message": "Timed out waiting for refinement events.",
+            },
+        )
+    except asyncio.CancelledError:
+        raise
+    finally:
+        try:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+        except Exception:
+            pass
+        await redis_client.aclose()
+
+
+@router.post("/{persona_id}/refine")
+async def refine(
+    persona_id: uuid.UUID,
+    body: RefineRequest,
+    user: CanRefine,
+    db: DBSession,
+):
+    persona = await db.get(Persona, persona_id)
+    if persona is None or persona.user_id != user.id or persona.deleted_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Persona not found")
+
+    if persona.status not in (PersonaStatus.GENERATED, PersonaStatus.PUBLISHED):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "PERSONA_NOT_REFINABLE",
+                "message": "Persona is not refinable in its current status.",
+            },
+        )
+
+    try:
+        sanitized_message = PromptSanitizer().sanitize(body.message)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "EMPTY_PROMPT", "message": "Prompt is empty after sanitization."},
+        ) from exc
+
+    result = await db.execute(
+        select(ChatSession)
+        .where(ChatSession.persona_id == persona_id, ChatSession.deleted_at == None)  # noqa
+        .order_by(ChatSession.created_at.asc())
+        .limit(1)
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        session = ChatSession(
+            persona_id=persona.id,
+            user_id=user.id,
+            last_message_at=datetime.now(UTC),
+        )
+        db.add(session)
+        await db.flush()
+
+    result = await db.execute(
+        select(ConversationMessage.round_number)
+        .where(
+            ConversationMessage.persona_id == persona_id,
+            ConversationMessage.session_id == session.id,
+        )
+        .order_by(ConversationMessage.round_number.desc())
+        .limit(1)
+    )
+    last_round = result.scalar_one_or_none()
+    round_number = 0 if last_round is None else last_round + 1
+
+    session.last_message_at = datetime.now(UTC)
+    db.add(
+        ConversationMessage(
+            session_id=session.id,
+            persona_id=persona.id,
+            role=MessageRole.USER,
+            content=sanitized_message,
+            round_number=round_number,
+        )
+    )
+    await db.commit()
+
+    channel = f"persona:{persona_id}:refine:{uuid.uuid4().hex}"
+    return StreamingResponse(
+        _relay_refine(channel, persona.id, session.id, sanitized_message),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
 
 
