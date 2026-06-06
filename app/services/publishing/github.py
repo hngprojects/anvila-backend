@@ -35,7 +35,7 @@ async def _upsert_file(url: str, headers: dict, content: str | None, message: st
     Shared core: PUT a single file to any GitHub repo.
     Fetches existing SHA first so it works as both create and update.
     """
-    if not content:
+    if content is None:
         return
     async with httpx.AsyncClient() as client:
         existing = await client.get(url, headers=headers)

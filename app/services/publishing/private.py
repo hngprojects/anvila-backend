@@ -78,13 +78,15 @@ async def publish_persona_private(persona: Persona, user: User, db: AsyncSession
         )
 
     token = decrypt(user.github_access_token_encrypted)
-    username = await _resolve_username(token, user.github_username)
     slug = slugify(persona.name)
 
     repo = await create_user_repo(
         slug=slug,
         description=(persona.description_summary or f"Persona: {persona.name}")[:255],
         token=token,
+    )
+    username = repo.get("owner", {}).get("login") or await _resolve_username(
+        token, user.github_username
     )
 
     # partial bakes username + token into the upsert signature → (path, content, message)

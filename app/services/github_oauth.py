@@ -299,15 +299,25 @@ async def process_github_callback(
         user = await db.get(User, connect_for_user_id)
         if not user or not user.is_active:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Account not found or disabled")
+        subject = str(subject_raw)
+        if user.github_subject and user.github_subject != subject:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "A different GitHub account is already connected to this user",
+            )
+        existing_owner = await get_user_by_github_subject(db, subject)
+        if existing_owner is not None and existing_owner.id != user.id:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "This GitHub account is already connected to another user",
+            )
 
         user.github_access_token_encrypted = encrypted_token
         user.github_connected = True
         user.github_username = (
             str(profile["login"]) if profile.get("login") else user.github_username
         )
-        # Bind github_subject if not already set (so they could also log in via GitHub later)
-        if not user.github_subject:
-            user.github_subject = str(subject_raw)
+        user.github_subject = str(subject_raw)
 
         await db.flush()
         _logger.info(
