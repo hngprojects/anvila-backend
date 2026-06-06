@@ -64,6 +64,7 @@ from app.services.github_oauth import (
     apply_github_link,
     build_github_auth_url,
     create_github_connect_state,
+    create_github_login_state,
     decode_github_state,
     process_github_callback,
 )
@@ -249,6 +250,9 @@ async def me_endpoint(request: Request, current_user: CurrentUser) -> ApiRespons
             is_super_admin=current_user.is_super_admin,
             email_verified=current_user.email_verified,
             created_at=current_user.created_at.isoformat(),
+            github_subject=current_user.github_subject,
+            github_username=current_user.github_username,
+            github_connected=current_user.github_connected,
         ),
     )
 
@@ -348,7 +352,7 @@ _github_router = APIRouter(tags=["auth"])
 
 @_github_router.get("/github", summary="Start GitHub OAuth flow")
 async def github_start(response: Response) -> Response:
-    state = create_oauth_state_token()
+    state = create_github_login_state()
     set_oauth_state_cookie(response, state)
     response.status_code = status.HTTP_307_TEMPORARY_REDIRECT
     response.headers["Location"] = build_github_auth_url(state)
@@ -400,7 +404,6 @@ async def github_callback(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid OAuth state",
             )
-        decode_token(state, expected_purpose="oauth_state")
         intent, connect_user_id = decode_github_state(state)
 
         if intent == GitHubOAuthIntent.CONNECT:
