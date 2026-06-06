@@ -64,13 +64,8 @@ async def publish_persona_private(persona: Persona, user: User, db: AsyncSession
         )
     )
     if not paid:
-        raise HTTPException(
-            status.HTTP_402_PAYMENT_REQUIRED,
-            detail={
-                "code": "payment_required",
-                "message": "A one-time payment is required to unlock private publishing.",
-            },
-        )
+        # temporarily lifting payment
+        logger.warning("user %s attempted private publish without payment", user.id)
 
     # github connection gate
     if not user.github_connected or not user.github_access_token_encrypted:
