@@ -121,6 +121,13 @@ class Settings(BaseSettings):
         self.LLM_PROVIDER = provider
         return self
 
+    # ------------------------------------------------------------------
+    # stripe
+    # ------------------------------------------------------------------
+    STRIPE_SECRET_KEY: str
+    STRIPE_PRICE_ID: str
+    STRIPE_WEBHOOK_SECRET: str
+
 
 @lru_cache
 def get_settings() -> Settings:
