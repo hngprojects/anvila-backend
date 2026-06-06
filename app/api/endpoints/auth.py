@@ -365,7 +365,6 @@ async def github_connect_start(
     current_user: CurrentUser,
 ) -> Response:
     state = create_github_connect_state(str(current_user.id))
-    set_oauth_state_cookie(response, state)
     response.status_code = status.HTTP_307_TEMPORARY_REDIRECT
     response.headers["Location"] = build_github_auth_url(state)
     return response
