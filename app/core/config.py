@@ -1,6 +1,8 @@
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic import PostgresDsn
+from cryptography.fernet import Fernet
+from pydantic import Field, PostgresDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,13 +14,128 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # ------------------------------------------------------------------
+    # App
+    # ------------------------------------------------------------------
     PROJECT_NAME: str = "anvila-backend"
     API_V1_PREFIX: str = "/api/v1"
-    ADMIN_EMAIL: str | None = None
+    ADMIN_EMAIL: str = "admin@anvila.com"
     ADMIN_PASSWORD: str | None = None
-
     DATABASE_URL: PostgresDsn
     LOG_LEVEL: str = "INFO"
+    FRONTEND_URL: str = "http://localhost:3000"
+    TRUSTED_PROXIES: str = ""
+    COOKIE_SECURE: bool = True
+
+    # ------------------------------------------------------------------
+    # Redis / cache
+    # ------------------------------------------------------------------
+    REDIS_URL: str = ""
+    DEFAULT_CACHE_TTL: int = 300  # seconds
+
+    # ------------------------------------------------------------------
+    # JWT / tokens
+    # ------------------------------------------------------------------
+    JWT_SECRET: Annotated[str, Field(min_length=32)]
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: Annotated[int, Field(gt=0)] = 60
+    REFRESH_TOKEN_EXPIRE_DAYS: Annotated[int, Field(gt=0)] = 7
+    VERIFICATION_TOKEN_EXPIRE_HOURS: Annotated[int, Field(gt=0)] = 24
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: Annotated[int, Field(gt=0)] = 60
+    ENCRYPTION_KEY: str
+
+    @model_validator(mode="after")
+    def _validate_encryption_key(self) -> "Settings":
+        try:
+            Fernet(self.ENCRYPTION_KEY.encode())
+        except Exception as exc:
+            raise ValueError("ENCRYPTION_KEY must be a valid Fernet key") from exc
+        return self
+
+    # ------------------------------------------------------------------
+    # EMAIL
+    # ------------------------------------------------------------------
+    BREVO_API_KEY: str = ""
+    SMTP_FROM_NAME: str = "Anvila "
+    SMTP_FROM_EMAIL: str = "hello@anvila.com"
+
+    # ------------------------------------------------------------------
+    # Google OAuth
+    # ------------------------------------------------------------------
+    GOOGLE_CLIENT_ID: str
+    GOOGLE_CLIENT_SECRET: str
+    GOOGLE_REDIRECT_URI: str
+    GOOGLE_AUTH_URL: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    GOOGLE_TOKEN_URL: str = "https://oauth2.googleapis.com/token"
+    GOOGLE_USERINFO_URL: str = "https://openidconnect.googleapis.com/v1/userinfo"
+    GOOGLE_SCOPES: str = "openid email profile"
+
+    # ------------------------------------------------------------------
+    # GitHub OAuth
+    # ------------------------------------------------------------------
+    GITHUB_CLIENT_ID: str | None = None
+    GITHUB_CLIENT_SECRET: str | None = None
+    GITHUB_REDIRECT_URI: str | None = None
+    GITHUB_AUTH_URL: str = "https://github.com/login/oauth/authorize"
+    GITHUB_TOKEN_URL: str = "https://github.com/login/oauth/access_token"
+    GITHUB_USERINFO_URL: str = "https://api.github.com/user"
+    GITHUB_EMAILS_URL: str = "https://api.github.com/user/emails"
+    GITHUB_SCOPES: str = "read:user user:email"
+    GITHUB_OAUTH_ENABLED: bool = False
+    OAUTH_LINK_TOKEN_EXPIRE_MINUTES: int = 30
+
+    OPENCLAW_API_BASE: str = "https://clawhub.ai/api/v1"
+
+    GITHUB_TOKEN: str | None = None
+    GITHUB_ORG: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_github_oauth_credentials(self) -> "Settings":
+        if not self.GITHUB_OAUTH_ENABLED:
+            return self
+        missing = [
+            name
+            for name, value in (
+                ("GITHUB_CLIENT_ID", self.GITHUB_CLIENT_ID),
+                ("GITHUB_CLIENT_SECRET", self.GITHUB_CLIENT_SECRET),
+                ("GITHUB_REDIRECT_URI", self.GITHUB_REDIRECT_URI),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError(
+                "GITHUB_OAUTH_ENABLED=True requires GITHUB_CLIENT_ID, "
+                "GITHUB_CLIENT_SECRET, and GITHUB_REDIRECT_URI to be set. "
+                f"Missing: {', '.join(missing)}."
+            )
+        return self
+
+    # ------------------------------------------------------------------
+    # LLM
+    # ------------------------------------------------------------------
+    LLM_PROVIDER: str = "gemini"
+    GEMINI_API_KEY: str | None = None
+    GEMINI_API_KEYS: list[str] = []
+    GEMINI_MODEL_NAME: str = "gemini-3.5-flash"
+    GEMINI_TIMEOUT_SECONDS: Annotated[int, Field(gt=0)] = 30
+    ALERT_EMAIL_RECIPIENTS: list[str] = []  # emails that should be alerted for key exhuastion
+
+    @model_validator(mode="after")
+    def _validate_llm_credentials(self) -> "Settings":
+        provider = self.LLM_PROVIDER.strip().lower()
+        if provider not in {"gemini"}:
+            raise ValueError(f"Unsupported LLM_PROVIDER: {self.LLM_PROVIDER!r}")
+        if provider == "gemini" and not (self.GEMINI_API_KEY and self.GEMINI_API_KEY.strip()):
+            raise ValueError("LLM_PROVIDER='gemini' requires GEMINI_API_KEY to be set.")
+        self.LLM_PROVIDER = provider
+        return self
+
+    # ------------------------------------------------------------------
+    # stripe
+    # ------------------------------------------------------------------
+    STRIPE_SECRET_KEY: str
+    STRIPE_PRICE_ID: str
+    STRIPE_WEBHOOK_SECRET: str
 
 
 @lru_cache

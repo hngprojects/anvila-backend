@@ -16,6 +16,16 @@ dependencies = [
     "pwdlib[argon2]>=0.3.0",
     "sib-api-v3-sdk>=7.6.0",
     "python-decouple>=3.8",
+    "prometheus-client>=0.22.1",
+    "celery>=5.6.3",
+    "pdfplumber>=0.11.0",
+    "docx2txt>=0.8",
+    "redis>=5.0,<8.0",
+    "google-genai>=2.5.0",
+    "slowapi>=0.1.9",
+    "bleach>=6.3.0",
+    "cryptography>=48.0.0",
+    "stripe>=15.2.0",
 ]
 
 [dependency-groups]

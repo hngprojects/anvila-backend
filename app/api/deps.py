@@ -5,11 +5,12 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import decode_token
+from app.core.paginator import CursorParams, PageParams
+from app.core.security import TokenPurpose, decode_token
 from app.db.session import get_session
+from app.models.enums import UserPlan
 from app.models.user import User
 from app.services.auth import get_user_by_id
-
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -26,15 +27,10 @@ async def get_current_user(
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    payload = decode_token(credentials.credentials)
-    if payload.get("purpose") != "access":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token purpose",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    payload = decode_token(credentials.credentials, expected_purpose=TokenPurpose.ACCESS)
     try:
         user_id = uuid.UUID(payload["sub"])
+        token_version = int(payload["version"])
     except (KeyError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -48,7 +44,66 @@ async def get_current_user(
             detail="User not found or inactive",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if token_version != user.token_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def get_current_admin(current_user: CurrentUser) -> User:
+    if not current_user.is_admin and not current_user.is_super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return current_user
+
+
+def require_can_generate(user: CurrentUser) -> User:
+    # if user.plan == UserPlan.FREE and user.generation_count >= 3:
+    #     raise HTTPException(
+    #         status_code=403,
+    #         detail={
+    #             "code": "GENERATION_LIMIT_REACHED",
+    #             "message": "Free plan persona generation limit reached. Upgrade to continue.",
+    #         },
+    #     )
+    return user
+
+
+def require_can_refine(user: CurrentUser) -> User:
+    # if user.plan == UserPlan.FREE and user.refine_used:
+    #     raise HTTPException(
+    #         status_code=403,
+    #         detail={
+    #             "code": "REFINE_LIMIT_REACHED",
+    #             "message": "One free refinement used. Upgrade to continue.",
+    #         },
+    #     )
+    return user
+
+
+def require_pro(user: CurrentUser) -> User:
+    if user.plan != UserPlan.PAID:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "PRO_REQUIRED",
+                "message": "This feature requires a paid plan.",
+            },
+        )
+    return user
+
+
+CanGenerate = Annotated[User, Depends(require_can_generate)]
+CanRefine = Annotated[User, Depends(require_can_refine)]
+ProUser = Annotated[User, Depends(require_pro)]
+AdminUser = Annotated[User, Depends(get_current_admin)]
+PaginationParams = Annotated[PageParams, Depends(PageParams)]
+CursorPaginationParams = Annotated[CursorParams, Depends(CursorParams)]

@@ -1,12 +1,16 @@
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
 from app.models.enums import UserPlan, UserProvider
 
 if TYPE_CHECKING:
+    from app.models.chat_session import ChatSession
+    from app.models.oauth_link_token import OAuthLinkToken
+    from app.models.payment_transaction import PaymentTransaction
     from app.models.persona import Persona
     from app.models.refresh_token import RefreshToken
 
@@ -51,6 +55,21 @@ class User(BaseModel):
         unique=True,
         index=True,
     )
+    github_subject: Mapped[str | None] = mapped_column(
+        String(255),
+        unique=True,
+        index=True,
+    )
+
+    verification_token_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+    )
+    verification_token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     is_admin: Mapped[bool] = mapped_column(
         Boolean,
@@ -65,6 +84,36 @@ class User(BaseModel):
         server_default="false",
     )
 
+    github_access_token_encrypted: Mapped[str | None] = mapped_column(Text)
+    github_connected: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
+    # Generation tracking
+    generation_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    total_tokens_used: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
+    # Refinement trial
+    refine_used: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    upgraded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # for invalidate all existing tokens on password change or other security events
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Relationships to add
+    chat_sessions: Mapped[list["ChatSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
     # relationships
     personas: Mapped[list["Persona"]] = relationship(
         back_populates="user",
@@ -73,4 +122,11 @@ class User(BaseModel):
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+    oauth_link_tokens: Mapped[list["OAuthLinkToken"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    payment_transactions: Mapped[list["PaymentTransaction"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
     )
