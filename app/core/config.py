@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Annotated
 
+from cryptography.fernet import Fernet
 from pydantic import Field, PostgresDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -42,6 +43,14 @@ class Settings(BaseSettings):
     VERIFICATION_TOKEN_EXPIRE_HOURS: Annotated[int, Field(gt=0)] = 24
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: Annotated[int, Field(gt=0)] = 60
     ENCRYPTION_KEY: str
+
+    @model_validator(mode="after")
+    def _validate_encryption_key(self) -> "Settings":
+        try:
+            Fernet(self.ENCRYPTION_KEY.encode())
+        except Exception as exc:
+            raise ValueError("ENCRYPTION_KEY must be a valid Fernet key") from exc
+        return self
 
     # ------------------------------------------------------------------
     # EMAIL
