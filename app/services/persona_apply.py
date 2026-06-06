@@ -47,7 +47,7 @@ async def apply_generation(
     if after_files_applied is not None:
         await after_files_applied()
 
-    from app.services.skill_matcher import match_skills
+    from app.services.skills import match_skills
 
     try:
         skills = await match_skills(
