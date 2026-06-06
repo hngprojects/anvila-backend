@@ -10,7 +10,7 @@ def build_readme(persona_data: dict, skills: list[Skill]) -> str:
     if skills:
         skill_entries = []
         for i, skill in enumerate(skills, start=1):
-            folder = skill.slug.split("/")[-1]
+            folder = skill.slug
             tags = ", ".join(skill.tags) if skill.tags else "general"
             entry = (
                 f"### {i}. [{skill.name}](./skills/{folder}.md)\n"

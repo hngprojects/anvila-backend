@@ -20,6 +20,8 @@ async def fetch_skill(slug: str) -> dict[str, Any] | None:
     Returns a flattened dict merging skill + latestVersion + owner +
     moderation, or None if not found / error.
     """
+    if not slug or not slug.strip():
+        return None
     url = f"{_base()}/skills/{slug}"
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -45,6 +47,10 @@ async def search_skills(query: str, limit: int = 5) -> list[dict[str, Any]]:
     Returns a list of result dicts. Each result contains:
       slug, displayName, summary, version, ownerHandle, owner, score
     """
+    if limit < 1:
+        limit = 5
+    if limit > 100:
+        limit = 100
     url = f"{_base()}/search"
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:

@@ -1,7 +1,8 @@
 import logging
+import re
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import ARRAY, String, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,8 +60,6 @@ async def match_skills(
 
 
 def is_safe_skill_slug(slug: str) -> bool:
-    import re
-
     if not slug or len(slug) > 220:
         return False
     if ".." in slug or slug.startswith("/") or slug.startswith("\\"):
@@ -109,15 +108,23 @@ async def _db_exact(slug: str, db: AsyncSession) -> Skill | None:
 
 
 async def _db_fuzzy(slug: str, db: AsyncSession) -> Skill | None:
-    """Match keywords from slug against Skill.name and Skill.tags in local DB."""
     keywords = _keywords(slug)
     if not keywords:
         return None
 
-    result = await db.execute(select(Skill).where(Skill.is_active.is_(True)))
-    all_skills = result.scalars().all()
+    name_filters = [func.lower(Skill.name).contains(kw) for kw in keywords]
 
-    for skill in all_skills:
+    tag_filter = Skill.tags.op("&&")(cast(keywords, ARRAY(String)))
+
+    result = await db.execute(
+        select(Skill).where(
+            Skill.is_active.is_(True),
+            or_(*name_filters, tag_filter),
+        )
+    )
+    candidates = result.scalars().all()
+
+    for skill in candidates:
         name_words = set(skill.name.lower().split())
         tag_words = {t.lower() for t in (skill.tags or [])}
         combined = name_words | tag_words
@@ -126,6 +133,26 @@ async def _db_fuzzy(slug: str, db: AsyncSession) -> Skill | None:
             return skill
 
     return None
+
+
+# async def _db_fuzzy(slug: str, db: AsyncSession) -> Skill | None:
+#     """Match keywords from slug against Skill.name and Skill.tags in local DB."""
+#     keywords = _keywords(slug)
+#     if not keywords:
+#         return None
+#
+#     result = await db.execute(select(Skill).where(Skill.is_active.is_(True)))
+#     all_skills = result.scalars().all()
+#
+#     for skill in all_skills:
+#         name_words = set(skill.name.lower().split())
+#         tag_words = {t.lower() for t in (skill.tags or [])}
+#         combined = name_words | tag_words
+#
+#         if all(kw in combined for kw in keywords):
+#             return skill
+#
+#     return None
 
 
 async def _clawhub_fuzzy(
@@ -261,9 +288,9 @@ async def _push(slug: str, skill_md_content: str) -> None:
             slug=SKILLS_REPO,
             path=f"{path}.md",
             content=skill_md_content,
-            message=f"chore: upsert skill {path}/SKILL.md",
+            message=f"chore: upsert skill {path}.md",
         )
-        logger.info("pushed %s/SKILL.md to org repo", path)
+        logger.info("pushed %s.md to org repo", path)
     except Exception:
         logger.exception("GitHub push failed for skill %s — continuing", slug)
 

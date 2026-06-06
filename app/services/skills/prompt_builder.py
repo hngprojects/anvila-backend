@@ -1,5 +1,7 @@
 from typing import Any
 
+import yaml
+
 
 def build_install_prompt(
     slug: str,
@@ -121,29 +123,5 @@ def _tags(metadata: dict[str, Any]) -> str:
 
 
 def _yaml(value: str) -> str:
-    unsafe = (
-        ":",
-        "#",
-        "[",
-        "]",
-        "{",
-        "}",
-        ",",
-        "&",
-        "*",
-        "?",
-        "|",
-        "-",
-        "<",
-        ">",
-        "=",
-        "!",
-        "%",
-        "@",
-        "`",
-        '"',
-        "'",
-    )
-    if any(c in value for c in unsafe):
-        return '"' + value.replace('"', '\\"') + '"'
-    return value
+    dumped = yaml.safe_dump(value, default_flow_style=True, allow_unicode=True)
+    return dumped.rstrip("\n")
