@@ -115,6 +115,9 @@ class MeResponse(BaseModel):
     is_admin: bool
     is_super_admin: bool
     email_verified: bool
+    github_subject: str | None
+    github_username: str | None
+    github_connected: bool
     created_at: str
 
     model_config = {"from_attributes": True}

@@ -59,9 +59,13 @@ from app.services.auth import (
 )
 from app.services.github_oauth import (
     GITHUB_LINK_CONFIRMATION_PATH,
+    GitHubOAuthIntent,
     LoginCompleted,
     apply_github_link,
     build_github_auth_url,
+    create_github_connect_state,
+    create_github_login_state,
+    decode_github_state,
     process_github_callback,
 )
 from app.services.google_oauth import (
@@ -246,6 +250,9 @@ async def me_endpoint(request: Request, current_user: CurrentUser) -> ApiRespons
             is_super_admin=current_user.is_super_admin,
             email_verified=current_user.email_verified,
             created_at=current_user.created_at.isoformat(),
+            github_subject=current_user.github_subject,
+            github_username=current_user.github_username,
+            github_connected=current_user.github_connected,
         ),
     )
 
@@ -345,7 +352,19 @@ _github_router = APIRouter(tags=["auth"])
 
 @_github_router.get("/github", summary="Start GitHub OAuth flow")
 async def github_start(response: Response) -> Response:
-    state = create_oauth_state_token()
+    state = create_github_login_state()
+    set_oauth_state_cookie(response, state)
+    response.status_code = status.HTTP_307_TEMPORARY_REDIRECT
+    response.headers["Location"] = build_github_auth_url(state)
+    return response
+
+
+@_github_router.get("/github/connect", summary="Connect GitHub to existing account")
+async def github_connect_start(
+    response: Response,
+    current_user: CurrentUser,
+) -> Response:
+    state = create_github_connect_state(str(current_user.id))
     set_oauth_state_cookie(response, state)
     response.status_code = status.HTTP_307_TEMPORARY_REDIRECT
     response.headers["Location"] = build_github_auth_url(state)
@@ -385,7 +404,20 @@ async def github_callback(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid OAuth state",
             )
-        decode_token(state, expected_purpose="oauth_state")
+        intent, connect_user_id = decode_github_state(state)
+
+        if intent == GitHubOAuthIntent.CONNECT:
+            await process_github_callback(
+                db, code=code, request=request, connect_for_user_id=connect_user_id
+            )
+            await db.commit()
+            # FE already has a valid session — just redirect back, it calls /me to refresh state
+            redirect = RedirectResponse(
+                f"{settings.FRONTEND_URL}/connections/github?github=connected",
+                status_code=302,
+            )
+            clear_oauth_state_cookie(redirect)
+            return redirect
 
         outcome = await process_github_callback(db, code=code, request=request)
 
@@ -405,9 +437,9 @@ async def github_callback(
         await db.commit()
         clear_oauth_state_cookie(response)
         link_url = (
-            f"{settings.FRONTEND_URL}{GITHUB_LINK_CONFIRMATION_PATH}?token={outcome.link_token}"
+            f"{settings.FRONTEND_URL}{GITHUB_LINK_CONFIRMATION_PATH}?token={outcome.link_token}"  # type: ignore
         )
-        bg_task.add_task(send_oauth_link_email, outcome.email, link_url)
+        bg_task.add_task(send_oauth_link_email, outcome.email, link_url)  # type: ignore
         return ApiResponse[LinkConfirmationData](
             message=(
                 "We've sent a confirmation link to your email. "
@@ -415,7 +447,7 @@ async def github_callback(
             ),
             data=LinkConfirmationData(
                 link_confirmation_required=True,
-                email_destination_hint=_mask_email(outcome.email),
+                email_destination_hint=_mask_email(outcome.email),  # type: ignore
             ),
         )
 

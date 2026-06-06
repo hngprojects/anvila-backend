@@ -10,6 +10,7 @@ from app.models.enums import UserPlan, UserProvider
 if TYPE_CHECKING:
     from app.models.chat_session import ChatSession
     from app.models.oauth_link_token import OAuthLinkToken
+    from app.models.payment_transaction import PaymentTransaction
     from app.models.persona import Persona
     from app.models.refresh_token import RefreshToken
 
@@ -125,4 +126,7 @@ class User(BaseModel):
     oauth_link_tokens: Mapped[list["OAuthLinkToken"]] = relationship(
         back_populates="user",
         cascade="all, delete-orphan",
+    )
+    payment_transactions: Mapped[list["PaymentTransaction"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
     )

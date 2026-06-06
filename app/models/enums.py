@@ -57,3 +57,9 @@ class SessionStatus(enum.StrEnum):
 class MessageRole(enum.StrEnum):
     USER = "user"
     ASSISTANT = "assistant"
+
+
+class PaymentStatus(enum.StrEnum):
+    PENDING = "pending"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"

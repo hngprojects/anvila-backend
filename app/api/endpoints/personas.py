@@ -45,6 +45,7 @@ from app.services.context_manager import ContextManager
 from app.services.file_extractor import extract_text
 from app.services.prompt_sanitizer import PromptSanitizer
 from app.services.publish_service import publish_persona
+from app.services.publishing.private import publish_persona_private
 from app.services.stream_service import _sse, stream_generation
 from app.worker.tasks.generation import generate_persona
 from app.worker.tasks.refine import refine_persona
@@ -636,3 +637,37 @@ async def publish_persona_to_github(
     )
 
     return ApiResponse[PublishPersonaResponse](message="Persona published to GitHub.", data=data)
+
+
+@router.post(
+    "/{persona_id}/publish/private",
+    summary="Publish persona to user's private GitHub repository",
+    status_code=status.HTTP_200_OK,
+    response_model=ApiResponse[PublishPersonaResponse],
+)
+async def publish_persona_to_github_private(
+    persona_id: uuid.UUID,
+    db: DBSession,
+    current_user: CurrentUser,
+):
+    persona: Persona | None = await db.get(Persona, persona_id)
+    if not persona or persona.deleted_at is not None:
+        raise HTTPException(status_code=404, detail="Persona not found")
+    if persona.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your persona")
+
+    persona = await publish_persona_private(persona, current_user, db)
+    await db.refresh(persona)
+
+    data = PublishPersonaResponse(
+        persona_id=persona.id,
+        status=persona.status,
+        published_at=persona.published_at,
+        github_repo_url=persona.github_repo_url,
+        github_clone_url=persona.github_clone_url,
+        github_zip_url=persona.github_zip_url,
+    )
+    return ApiResponse[PublishPersonaResponse](
+        message="Persona published to your private GitHub repository.",
+        data=data,
+    )
