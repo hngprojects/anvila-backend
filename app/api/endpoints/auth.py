@@ -361,11 +361,9 @@ async def github_start(response: Response) -> Response:
 
 @_github_router.get("/github/connect", summary="Connect GitHub to existing account")
 async def github_connect_start(
-    response: Response,
     current_user: CurrentUser,
 ):
     state = create_github_connect_state(str(current_user.id))
-    response.status_code = status.HTTP_307_TEMPORARY_REDIRECT
     url = build_github_auth_url(state)
     return {"url": url}
 
